@@ -1,9 +1,9 @@
 # The platform, module by module
 
-This page maps the 15-module blueprint Ghostlight grew from onto what actually
-ships in this repository — and, just as importantly, onto what does **not**.
-Nothing here is a promise of revenue; see [MONETIZATION.md](MONETIZATION.md)
-for that conversation.
+This page maps the 15-module blueprint Ghostlight grew from — plus the five
+later additions — onto what actually ships in this repository, and just as
+importantly onto what does **not**. Nothing here is a promise of revenue; see
+[MONETIZATION.md](MONETIZATION.md) for that conversation.
 
 ## What is live
 
@@ -24,6 +24,11 @@ for that conversation.
 | **13. Multi-account** | `channels.py`, `secrets/channels/<id>/` | Any number of voices, each with its own token, client secret, quota, airtimes, visibility, approval mode and analytics. |
 | **14. Idea wall & calendar** | `ideas.py`, **The Radar** tab | Original pitch cards with an angle, question and director's guidance; one click turns a pitch into a commission. The calendar shows planned airtimes, ready films, films in production and what already published — and says "empty" when it is empty. |
 | **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream. Installable on desktop and mobile; the shell is cached for offline reading while all studio state stays network-only. |
+| **16. Vertical repurposing** | `ghostlight/repurpose.py`, `orchestrator.repurpose` | Cuts complete-thought clips from a finished film using the word timings in `narration.json`. Windows are 15–60 s, non-overlapping, deduplicated by digest and text overlap, and never split a spoken sentence. Each cut becomes its own vertical child record (`kind=clip`) with blurred-fill framing, fitted foreground and burned-in captions, so the normal gate, approval, share-kit and upload paths work unchanged. |
+| **17. Localization** | `ghostlight/languages.py`, the film drawer | The configured model translates title, hook, description, tags and every spoken segment into Hindi, Telugu, Tamil, Spanish, French, German or Portuguese. Segment counts are validated and unchanged source text is rejected rather than passed off as a translation. Captions keep the original timings; a localized voiceover is recorded only when `edge-tts` is reachable and is labelled with its real provider. |
+| **18. Editorial read** | `ghostlight/editorial.py`, the film drawer | A deterministic second read of the script: hook, pacing, clarity, payoff, invitation, repetition, structure and rights flags, with a 0–100 score, concrete notes and hook starting points. It calls no model and explicitly labels its retention band a structural guess, not a forecast. |
+| **19. Notification center** | `notifications` table, `EventBus.notify`, the masthead bell | Durable studio notices for completed films, gate blocks, review requests, publications, failed localizations, exports and prunes. Unread counts survive restarts and the bell opens the relevant film. This is separate from the transient live log. |
+| **20. Library & maintenance** | `ghostlight/library.py`, **The knobs → The archive** | Storage report (records, tracked and on-disk size, free space, largest files, orphan folders), a catalogue ZIP with JSON/CSV and optional media, a safe SQLite backup, and a guarded prune. Pruning is preview-first, requires an explicit confirm, and only ever touches archived or failed films inside the studio's own video directory. |
 
 ## Honest boundaries
 
@@ -35,15 +40,23 @@ infrastructure or review processes that no local build can supply honestly.
   linking and app review for `instagram_content_publish`. The studio has no
   code path that pretends otherwise. Use the **share kit** in a film's drawer
   to hand a finished film to those networks manually.
-- **Multilingual output is not implemented.** `creator.language` exists in
-  config, but the Muse corpus, prompts and caption/upload defaults are
-  English. Non-English output would need a translated corpus, a matching
-  Piper/Edge voice and localised metadata templates. An LLM could translate a
-  script today, but the surrounding pipeline would still label it English.
-- **Long-form → Shorts repurposing is not automatic.** Every film is a
-  standalone essay; cutting clips from it would break the no-continuity
-  promise. The shelf lets you make a *new* short on the same subject, but it
-  will be written and painted fresh.
+- **Localization needs a real model and a real voice.** Metadata and caption
+  translation runs through the configured LLM provider; without one it fails
+  and says so instead of guessing. A localized voiceover additionally needs
+  `edge-tts` and network access. The original film is never relabelled: the
+  localization is a separate record under `data/videos/<id>/lang/<code>/`.
+  The offline Muse cannot translate, and no voice-cloning service is used —
+  cloning would need the speaker's consent and a provider account.
+- **Vertical cuts are excerpts, not sequels.** Repurposing lifts complete
+  thoughts from an existing film; it does not create a series, continue a
+  story or add new narration. The no-continuity and faceless rules still
+  apply, and the cut keeps its parent film's AI disclosure.
+- **Social publishing beyond YouTube is still manual.** The share kit hands
+  the caption, captions file and link to the operator; Instagram, TikTok and
+  Facebook are not uploaded by the studio (see the app-review boundary above).
+- **No avatars, lip-sync or on-camera presenters.** The studio is faceless by
+  design. Digital humans, talking heads and cloned likenesses are out of
+  scope, not missing switches.
 - **The SaaS layer is not built.** There are no tenants, billing, teams or
   per-user isolation. This is a single-operator studio that happens to run
   many channels. A hosted multi-tenant product would need auth, storage
@@ -51,6 +64,14 @@ infrastructure or review processes that no local build can supply honestly.
 - **Trends are a signal, not a swarm.** The live layer reads Google Trends RSS
   only; it does not scrape Instagram, TikTok or YouTube search. The curated
   shelf is the reliable path and works offline.
+- **Fact-checking is not automated.** The editorial rights check is a keyword
+  heuristic that points a human at licences, quotes and unsourced claims; it
+  is not legal clearance and cannot verify facts. Every flagged item still
+  needs a person.
+- **No billing or team accounts.** Usage stays on one machine and one
+  operator. Adding subscriptions, seats or usage metering would require a
+  real payment processor, auth and tenancy model — none of which is faked
+  here.
 - **Analytics are read-only.** The studio reads YouTube Analytics to learn; it
   never buys views, boosts posts or automates engagement. Those are the
   fastest routes to a policy strike.

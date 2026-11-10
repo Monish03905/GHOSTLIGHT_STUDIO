@@ -1,5 +1,5 @@
 /* Ghostlight shell cache. Live studio state always comes from the network. */
-const VERSION = 'ghostlight-v1';
+const VERSION = 'ghostlight-v2';
 const SHELL = [
   '/',
   '/index.html',
@@ -33,12 +33,13 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   if (url.pathname.startsWith('/icons/') || ['/styles.css', '/app.js'].includes(url.pathname)) {
+    /* Fresh first so a studio update shows up immediately; the cache is the fallback offline. */
     event.respondWith(
-      caches.match(request).then((hit) => hit || fetch(request).then((response) => {
+      fetch(request).then((response) => {
         const copy = response.clone();
         caches.open(VERSION).then((cache) => cache.put(request, copy));
         return response;
-      }))
+      }).catch(() => caches.match(request))
     );
     return;
   }

@@ -48,6 +48,12 @@ def _ollama_host() -> str:
     return raw
 
 
+def _local_client(timeout: float) -> httpx.Client:
+    # Ollama is on this machine; a proxy or a malformed NO_PROXY entry must not
+    # be able to break the call before the socket is even opened.
+    return httpx.Client(timeout=timeout, trust_env=False)
+
+
 def ollama_models(timeout: float = 1.5) -> list[str]:
     """Names of locally installed models, largest first, cached briefly."""
     global _OLLAMA_MODELS_CACHE
@@ -56,7 +62,8 @@ def ollama_models(timeout: float = 1.5) -> list[str]:
         return cached
     names: list[str] = []
     try:
-        response = httpx.get(f"{_ollama_host()}/api/tags", timeout=timeout)
+        with _local_client(timeout) as client:
+            response = client.get(f"{_ollama_host()}/api/tags")
         models = response.json().get("models", []) if response.status_code == 200 else []
         models.sort(key=lambda m: int(m.get("size", 0) or 0), reverse=True)
         names = [str(m.get("name", "")).strip() for m in models if m.get("name")]
@@ -312,7 +319,7 @@ class LLMClient:
             "format": "json",
             "options": {"temperature": temperature},
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with _local_client(self.timeout) as client:
             response = client.post(f"{_ollama_host()}/api/chat", json=payload)
         if response.status_code >= 400:
             raise LLMError(f"Ollama error {response.status_code}: {_short_error(response)}")

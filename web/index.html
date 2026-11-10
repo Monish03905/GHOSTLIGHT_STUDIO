@@ -30,7 +30,19 @@
         <span class="chip" id="chip-schedule" title="Publishing schedule">…</span>
         <span class="chip" id="chip-youtube" title="YouTube channels">…</span>
         <span class="chip" id="chip-quota" title="Today's quota">…</span>
+        <button class="bell" id="bell" type="button" aria-label="Studio notifications" aria-expanded="false">
+          <span class="bell-mark">✳</span>
+          <span class="bell-count" id="bell-count" hidden>0</span>
+        </button>
       </div>
+    </div>
+    <div class="bell-panel" id="bell-panel" hidden>
+      <div class="bell-head">
+        <span class="kicker">The bell</span>
+        <button class="link-btn" id="bell-read-all" type="button">Mark all read</button>
+      </div>
+      <ol class="bell-list" id="bell-list"></ol>
+      <p class="bell-note" id="bell-note">Quiet. The desk will ring when a film needs you.</p>
     </div>
   </header>
 
@@ -206,6 +218,7 @@
           <button class="filter" data-filter="ready">Ready</button>
           <button class="filter" data-filter="published">Published</button>
           <button class="filter" data-filter="drafting">In the works</button>
+          <button class="filter" data-filter="clips">Vertical cuts</button>
           <button class="filter" data-filter="failed">Abandoned</button>
           <button class="filter" data-filter="archived">Archived</button>
         </div>
@@ -238,6 +251,11 @@
           <h2 class="panel-title">The knobs</h2>
           <p class="panel-note">Everything saves the moment you press the button. The studio takes it from there.</p>
           <div id="settings-body"></div>
+        </div>
+        <div class="panel" id="panel-library">
+          <h2 class="panel-title">The archive</h2>
+          <p class="panel-note">What is on disk, a safe backup, and a guarded prune. Nothing leaves without a second click.</p>
+          <div id="library-body"></div>
         </div>
       </div>
     </section>

@@ -12,7 +12,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, content, ideas, publish, quality, trends
+from . import (
+    __version__, content, editorial, ideas, languages, library, publish, quality,
+    repurpose, trends,
+)
 from .channels import (
     CHANNEL_TEMPLATES,
     _slug,
@@ -141,6 +144,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "autopilot": showrunner.status(),
             "growth": _growth_summary(),
             "stats": db.stats(),
+            "notifications": {"unread": db.unread_notifications()},
             "desk": {
                 "name": cfg.get("studio.name"),
                 "tagline": cfg.get("studio.tagline"),
@@ -456,10 +460,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         status: str | None = None,
         archived: bool = False,
         channel_id: str | None = None,
+        kind: str | None = None,
+        language: str | None = None,
+        parent_id: str | None = None,
     ) -> dict[str, Any]:
         items = db.list_videos(
             limit=limit, offset=offset, fmt=format, status=status,
             include_archived=archived, channel_id=channel_id,
+            kind=kind, language=language, parent_id=parent_id,
         )
         return {"items": items, "count": len(items)}
 
@@ -471,6 +479,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         channel = channel_by_id(cfg, db, item.get("channel_id")) or {}
         item["channel_name"] = channel.get("name", "")
         item["metrics"] = db.get_metrics(video_id)
+        item["clips"] = db.list_clips(video_id)
+        item["localizations"] = db.list_localizations(video_id)
+        if item.get("parent_id"):
+            parent = db.get_video(str(item["parent_id"])) or {}
+            item["parent_title"] = parent.get("title", "")
+            item["parent_url"] = parent.get("youtube_url", "")
         return item
 
     @app.post("/api/videos/{video_id}/publish")
@@ -562,6 +576,152 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             video_id=video_id,
         )
         return {"id": video_id, "thumb_path": str(path), "variants": updated}
+
+    # -- editorial, clips, localization ---------------------------------
+    @app.get("/api/videos/{video_id}/editorial")
+    def video_editorial(video_id: str, refresh: bool = False) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        report = item.get("editorial")
+        if refresh or not isinstance(report, dict) or not report.get("checks"):
+            report = editorial.analyze_video(item)
+            db.update_video(video_id, editorial=report)
+        return {
+            "id": video_id,
+            "editorial": report,
+            "summary": editorial.summary(report),
+        }
+
+    @app.post("/api/videos/{video_id}/repurpose")
+    async def repurpose_film(video_id: str, request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        def _number(key: str) -> float | None:
+            raw = body.get(key)
+            if raw is None or str(raw).strip() == "":
+                return None
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{key} must be a number of seconds.")
+
+        try:
+            return studio.repurpose(
+                video_id,
+                count=int(body.get("count") or 3),
+                start=_number("start"),
+                end=_number("end"),
+                dry_run=bool(body.get("dry_run", False)),
+            )
+        except (ValueError, repurpose.RepurposeError) as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/api/videos/{video_id}/clips")
+    def video_clips(video_id: str) -> dict[str, Any]:
+        if not db.get_video(video_id):
+            raise HTTPException(404, "no such film")
+        items = db.list_clips(video_id)
+        return {"items": items, "count": len(items)}
+
+    @app.get("/api/videos/{video_id}/localizations")
+    def video_localizations(video_id: str) -> dict[str, Any]:
+        if not db.get_video(video_id):
+            raise HTTPException(404, "no such film")
+        return languages.status_for(db, video_id)
+
+    def _localize_now(video_id: str, language: str, voice: bool) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            return {"ok": False, "error": "no such film"}
+        try:
+            result = languages.localize_video(cfg, db, item, language, voice=voice)
+        except languages.LocalizationError as exc:
+            message = str(exc)
+            db.upsert_localization(video_id, language, {"status": "failed", "note": message[:900]})
+            bus.emit("language", f"Localization failed: {message}", level="warning", video_id=video_id)
+            bus.notify(
+                "Localization failed",
+                f"“{item.get('title', 'A film')}” into {language}: {message}",
+                kind="language", level="warning", video_id=video_id,
+            )
+            return {"ok": False, "error": message, "language": language}
+        except Exception as exc:  # a provider surprise must not kill the desk
+            message = f"Unexpected localization failure: {exc}"
+            db.upsert_localization(video_id, language, {"status": "failed", "note": message[:900]})
+            bus.emit("language", message, level="error", video_id=video_id)
+            bus.notify(
+                "Localization failed",
+                f"“{item.get('title', 'A film')}” into {language}: {exc}",
+                kind="language", level="error", video_id=video_id,
+            )
+            return {"ok": False, "error": message, "language": language}
+        bus.emit(
+            "language",
+            f"“{item.get('title', 'A film')}” localized into {result.get('language_label', language)}.",
+            level="success",
+            video_id=video_id,
+        )
+        bus.notify(
+            f"Localized into {result.get('language_label', language)}",
+            f"“{result.get('title', item.get('title', 'A film'))}” · "
+            + ("voiceover + captions" if result.get("audio_path") else "metadata + captions"),
+            kind="language", level="success", video_id=video_id,
+        )
+        return {"ok": True, **result}
+
+    @app.post("/api/videos/{video_id}/localize")
+    async def localize_film(video_id: str, request: Request) -> dict[str, Any]:
+        if not db.get_video(video_id):
+            raise HTTPException(404, "no such film")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            language = languages.get_language(str(body.get("language") or "")).code
+        except languages.LocalizationError as exc:
+            raise HTTPException(400, str(exc))
+        voice = bool(body.get("voice", False))
+        if bool(body.get("wait", False)):
+            return await asyncio.to_thread(_localize_now, video_id, language, voice)
+        threading.Thread(
+            target=_localize_now, args=(video_id, language, voice),
+            name="ghostlight-localize", daemon=True,
+        ).start()
+        return {
+            "ok": True,
+            "status": "working",
+            "language": language,
+            "note": "Translation runs in the background; the drawer will show it when it lands.",
+        }
+
+    @app.get("/api/videos/{video_id}/localization/{language}/{kind}")
+    def localization_file(video_id: str, language: str, kind: str) -> FileResponse:
+        if not db.get_video(video_id):
+            raise HTTPException(404, "no such film")
+        try:
+            code = languages.get_language(language).code
+        except languages.LocalizationError as exc:
+            raise HTTPException(404, str(exc))
+        item = db.get_localization(video_id, code)
+        if not item:
+            raise HTTPException(404, f"no {code} localization for this film")
+        key = {"captions": "srt_path", "audio": "audio_path"}.get(kind)
+        if not key:
+            raise HTTPException(404, f"no {kind} for this localization")
+        raw = str(item.get(key) or "")
+        path = Path(raw) if raw else None
+        if not path or not path.is_file():
+            raise HTTPException(404, f"{kind} for {code} is missing on disk")
+        root = Path(cfg.videos_dir).resolve()
+        if root not in path.resolve().parents:
+            raise HTTPException(403, "refusing to serve a file outside the studio")
+        media = {"captions": "text/plain; charset=utf-8", "audio": "audio/mpeg"}[kind]
+        return FileResponse(path, media_type=media)
 
     @app.get("/api/videos/{video_id}/file/{kind}")
     def video_file(video_id: str, kind: str, variant: str | None = None) -> FileResponse:
@@ -829,6 +989,27 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def events(limit: int = 80, since: int = 0) -> dict[str, Any]:
         return {"items": db.list_events(limit=limit, since_id=since)}
 
+    # -- notifications --------------------------------------------------
+    @app.get("/api/notifications")
+    def notifications(limit: int = 40, unread: bool = False) -> dict[str, Any]:
+        return {
+            "items": db.list_notifications(limit=limit, unread_only=unread),
+            "unread": db.unread_notifications(),
+        }
+
+    @app.post("/api/notifications/read")
+    async def notifications_read(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            notification_id = int(body.get("id") or 0)
+        except (TypeError, ValueError):
+            notification_id = 0
+        marked = db.mark_notification(notification_id)
+        return {"marked": marked, "unread": db.unread_notifications()}
+
     @app.get("/api/stream")
     async def stream() -> StreamingResponse:
         queue = bus.subscribe()
@@ -862,6 +1043,87 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def schedule_tick() -> dict[str, Any]:
         scheduler._tick()
         return scheduler.status()
+
+    # -- library & maintenance ------------------------------------------
+    @app.get("/api/library/storage")
+    def library_storage() -> dict[str, Any]:
+        return library.storage_report(cfg, db)
+
+    @app.post("/api/library/export")
+    async def library_export(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        video_ids = body.get("video_ids")
+        if video_ids is not None and not isinstance(video_ids, list):
+            raise HTTPException(400, "video_ids must be a list")
+        try:
+            result = await asyncio.to_thread(
+                library.export_catalogue, cfg, db,
+                include_media=bool(body.get("include_media", False)),
+                video_ids=[str(v) for v in video_ids] if video_ids else None,
+            )
+        except OSError as exc:
+            raise HTTPException(400, f"Export failed: {exc}")
+        bus.notify(
+            "Catalogue exported",
+            f"{result['films']} film(s) · {result['human']} · {result['path']}",
+            kind="library", level="success",
+        )
+        return result
+
+    @app.post("/api/library/backup")
+    async def library_backup() -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(library.backup_database, cfg, db)
+        except Exception as exc:
+            raise HTTPException(500, f"Backup failed: {exc}")
+        bus.notify(
+            "Database backed up",
+            f"{result['human']} · {result['path']}",
+            kind="library", level="success",
+        )
+        return result
+
+    @app.get("/api/library/prune")
+    def library_prune(days: int = 60) -> dict[str, Any]:
+        return library.prune_plan(cfg, db, days)
+
+    @app.post("/api/library/prune")
+    async def library_prune_apply(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            days = int(body.get("days") or 60)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "days must be a number")
+        if not bool(body.get("apply")):
+            return library.prune_plan(cfg, db, days)
+        if not bool(body.get("confirm")):
+            raise HTTPException(400, "Pruning needs an explicit confirmation.")
+        plan = library.prune_plan(cfg, db, days)
+        allowed = {str(row["id"]) for row in plan["candidates"]}
+        wanted = [str(v) for v in (body.get("ids") or []) if str(v) in allowed]
+        if not wanted:
+            raise HTTPException(400, "No listed film matched that selection; nothing was removed.")
+        try:
+            result = library.apply_prune(cfg, db, wanted, confirm=True)
+        except library.LibraryError as exc:
+            raise HTTPException(400, str(exc))
+        bus.emit(
+            "library",
+            f"Pruned {result['removed_records']} film(s), reclaimed {result['removed_human']}.",
+            level="warning",
+        )
+        bus.notify(
+            "Library pruned",
+            f"Removed {result['removed_records']} record(s) · reclaimed {result['removed_human']}.",
+            kind="library", level="warning",
+        )
+        return result
 
     # -- settings -------------------------------------------------------
     @app.get("/api/settings")

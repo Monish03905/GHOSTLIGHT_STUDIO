@@ -41,6 +41,20 @@ class EventBus:
         self._dispatch(event)
         return event
 
+    def notify(
+        self,
+        title: str,
+        body: str = "",
+        kind: str = "note",
+        level: str = "info",
+        video_id: str = "",
+        link: str = "",
+    ) -> dict[str, Any]:
+        """A durable notification for the bell, separate from the live event tail."""
+        return self.db.add_notification(
+            title=title, body=body, kind=kind, level=level, video_id=video_id, link=link
+        )
+
     def step(self, video_id: str, stage: str, message: str, progress: int, **extra: Any) -> None:
         self.emit(
             "stage",

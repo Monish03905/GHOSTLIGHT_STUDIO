@@ -53,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
 
     connect = sub.add_parser("connect", help="link your YouTube channel")
 
+    clips = sub.add_parser("clips", help="cut vertical clips from a finished film")
+    clips.add_argument("--id", default=None, help="source film id")
+    clips.add_argument("--count", type=int, default=3)
+    clips.add_argument("--dry-run", action="store_true", help="only show the plan")
+
+    sub.add_parser("backup", help="write a safe SQLite backup and keep the last ten")
+
     sub.add_parser("version", help="print version")
 
     args = parser.parse_args(argv)
@@ -125,6 +132,49 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: {current['error'][:500]}")
         studio.stop()
         return 0 if current.get("status") == "published" else 1
+
+    if args.command == "clips":
+        video = db.get_video(args.id) if args.id else None
+        if not video:
+            ready = [v for v in db.list_videos(limit=20, status="ready") if (v.get("kind") or "film") == "film"]
+            video = db.get_video(ready[0]["id"]) if ready else None
+        if not video:
+            print("No finished film to cut from.")
+            return 1
+        result = studio.repurpose(video["id"], count=args.count, dry_run=args.dry_run)
+        print(f"“{video.get('title', 'Film')}” — {len(result['clips'])} candidate cut(s)")
+        for clip in result["clips"]:
+            print(
+                f"  · {clip['start']:6.1f}–{clip['end']:6.1f}s  score {clip['score']:>3}  "
+                f"{clip['title']}"
+            )
+        if result.get("note"):
+            print(f"  {result['note']}")
+        if args.dry_run or not result.get("queued"):
+            return 0
+        before = len(db.list_clips(video["id"]))
+        studio.start()
+        import time
+
+        for _ in range(1800):
+            time.sleep(1)
+            if len(db.list_clips(video["id"])) > before:
+                break
+        made = db.list_clips(video["id"])
+        studio.stop()
+        print(f"Clips on the shelf: {len(made)}")
+        for clip in made:
+            print(f"  · {clip.get('title')} — {clip.get('video_path')}")
+        return 0 if made else 1
+
+    if args.command == "backup":
+        from . import library
+
+        result = library.backup_database(cfg, db)
+        print(f"Backup written: {result['path']} ({result['human']})")
+        if result["removed"]:
+            print(f"Removed {result['removed']} older backup(s), kept {result['kept']}.")
+        return 0
 
     if args.command == "status":
         stats = db.stats()

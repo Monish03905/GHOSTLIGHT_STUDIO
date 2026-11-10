@@ -21,6 +21,17 @@ const NETWORK = {
   loading: null,
 };
 
+const LANG_OPTIONS = [
+  { code: 'en', label: 'English', native: 'English' },
+  { code: 'hi', label: 'Hindi', native: 'हिन्दी' },
+  { code: 'te', label: 'Telugu', native: 'తెలుగు' },
+  { code: 'ta', label: 'Tamil', native: 'தமிழ்' },
+  { code: 'es', label: 'Spanish', native: 'Español' },
+  { code: 'fr', label: 'French', native: 'Français' },
+  { code: 'de', label: 'German', native: 'Deutsch' },
+  { code: 'pt', label: 'Portuguese', native: 'Português' },
+];
+
 const RADAR = {
   data: null,
   items: [],
@@ -182,8 +193,10 @@ function connectStream() {
     try {
       const event = JSON.parse(msg.data);
       pushLog(event);
-      if (['studio', 'schedule', 'youtube', 'autopilot', 'distribution'].includes(event.kind)) {
+      if (['studio', 'schedule', 'youtube', 'autopilot', 'distribution', 'repurpose', 'film',
+        'quality', 'approval', 'publish', 'clip', 'language', 'library', 'failure'].includes(event.kind)) {
         refresh();
+        loadNotifications();
       }
     } catch (_) {}
   };
@@ -212,7 +225,8 @@ async function loadVideos() {
   const extra = state.filter === 'archived' ? '&archived=true' : '';
   const statusFilter = ['ready', 'published', 'drafting', 'failed'].includes(state.filter)
     ? `&status=${state.filter}` : '';
-  const data = await api(`/api/videos?limit=120${statusFilter}${extra}`);
+  const kindFilter = state.filter === 'clips' ? '&kind=clip' : '';
+  const data = await api(`/api/videos?limit=120${statusFilter}${kindFilter}${extra}`);
   state.videos = data.items;
   renderGrid();
   const bench = await api('/api/videos?limit=12');
@@ -237,10 +251,12 @@ function renderGrid() {
     const progress = ['queued', 'drafting', 'uploading'].includes(v.status)
       ? `<div class="card-progress"><i style="width:${v.progress || 0}%"></i></div>` : '';
     const statusLabel = v.archived ? 'archived' : v.status;
+    card.className = `card${v.kind === 'clip' ? ' is-clip' : ''}`;
     card.innerHTML = `
       <div class="card-poster">
         ${poster}
         <span class="card-status st-${esc(v.status)}">${esc(statusLabel)}</span>
+        ${v.kind === 'clip' ? '<span class="card-flag">vertical cut</span>' : ''}
         ${progress}
       </div>
       <div class="card-body">
@@ -248,6 +264,7 @@ function renderGrid() {
         <div class="card-meta">
           <span>${esc(v.format === 'long' ? 'long form' : 'short')}</span>
           <span>${fmtDur(v.duration)}</span>
+          ${v.language && v.language !== 'en' ? `<span>${esc(v.language)}</span>` : ''}
         </div>
       </div>`;
     card.addEventListener('click', () => openDrawer(v.id));
@@ -278,6 +295,9 @@ async function openDrawer(id) {
     else actions.push('<button class="btn primary" data-act="publish">Publish to YouTube</button>');
   }
   if (v.status === 'failed') actions.push('<button class="btn primary" data-act="retry">Try again</button>');
+  if (v.kind !== 'clip' && v.video_path && ['ready', 'published'].includes(v.status)) {
+    actions.push('<button class="btn" data-act="repurpose">Cut vertical clips</button>');
+  }
   if (['ready', 'published'].includes(v.status)) actions.push('<button class="btn" data-act="replay">Watch</button>');
   if (['ready', 'published'].includes(v.status)) actions.push('<button class="btn" data-act="share">Share kit</button>');
   if (!v.archived) actions.push('<button class="btn danger" data-act="archive">Archive</button>');
@@ -308,8 +328,9 @@ async function openDrawer(id) {
 
   drawer.innerHTML = `
     <button class="drawer-close" data-act="close">✕</button>
-    <span class="kicker">${v.channel_name ? esc(v.channel_name) + ' · ' : ''}${esc(v.format === 'long' ? 'Long form' : 'Short')} · ${esc(v.niche || 'fresh idea')}</span>
+    <span class="kicker">${v.channel_name ? esc(v.channel_name) + ' · ' : ''}${v.kind === 'clip' ? 'Vertical cut' : esc(v.format === 'long' ? 'Long form' : 'Short')} · ${esc(v.niche || 'fresh idea')}${v.language && v.language !== 'en' ? ' · ' + esc(v.language) : ''}</span>
     <h2 class="film-title">${esc(v.title || 'Untitled commission')}</h2>
+    ${v.kind === 'clip' && v.parent_title ? `<p class="secret-note">Cut from <button class="link-btn" data-openclip="${esc(v.parent_id)}">${esc(v.parent_title)}</button></p>` : ''}
     <div class="film-meta">
       <span>${fmtDur(v.duration)}</span>
       <span>${fmtNum(v.words)} words</span>
@@ -327,7 +348,11 @@ async function openDrawer(id) {
     </div>
     ${variantsBlock}
     <div class="film-actions">${actions.join('')}</div>
+    <div class="clip-plan" id="clip-plan" hidden></div>
+    ${clipsBlock(v)}
     ${qualityBlock(v)}
+    ${editorialBlock(v)}
+    ${localizationBlock(v)}
     ${uploadBits.length ? `<p class="secret-note">${uploadBits.join(' · ')}</p>` : ''}
     ${v.error ? `<div class="error-note">${esc(v.error)}</div>` : ''}
     <div class="script-block">
@@ -361,6 +386,193 @@ async function openDrawer(id) {
       }
     });
   });
+
+  drawer.querySelectorAll('[data-openclip]').forEach((el) => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openDrawer(el.dataset.openclip);
+    });
+  });
+
+  drawer.querySelectorAll('[data-lang]').forEach((el) => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      localizeFilm(v.id, el.dataset.lang);
+    });
+  });
+}
+
+function fmtBytes(n) {
+  const value = Number(n) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+  return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function clipsBlock(v) {
+  const clips = Array.isArray(v.clips) ? v.clips : [];
+  if (!clips.length) return '';
+  return `<div class="clips-block">
+    <span class="kicker">Vertical cuts from this film</span>
+    <div class="clip-strip">
+      ${clips.map((clip) => `
+        <button type="button" class="clip-tile" data-openclip="${esc(clip.id)}">
+          <span class="clip-tile-frame">${clip.thumb_path ? `<img src="/api/videos/${clip.id}/file/thumb" alt="" />` : '<span class="noart">✳</span>'}</span>
+          <span class="clip-tile-title">${esc(clip.title || 'Untitled cut')}</span>
+          <span class="clip-tile-meta">${fmtDur(clip.duration)} · ${esc(clip.status)}</span>
+        </button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function editorialBlock(v) {
+  const report = v.editorial;
+  if (!report || !Array.isArray(report.checks) || !report.checks.length) {
+    return `<div class="editorial-block">
+      <span class="kicker">Editorial read</span>
+      <p class="quality-note">No structural read yet. The desk can read the script without calling a model.</p>
+      <button class="btn small" data-act="editorial">Read the script</button>
+    </div>`;
+  }
+  const rows = report.checks.map((c) => `
+    <li class="e-${esc(c.grade)}"><span>${esc(c.label)}</span><em>${esc(c.detail)}</em><b>${c.score}</b></li>
+  `).join('');
+  const flags = (report.risk && report.risk.flags) || [];
+  const suggestions = (report.suggestions || []).map((s) => `<li>${esc(s)}</li>`).join('');
+  const variants = (report.hook_variants || []).map((h) => `<li>${esc(h)}</li>`).join('');
+  return `<div class="editorial-block">
+    <div class="editorial-head">
+      <span class="kicker">Editorial read</span>
+      <span class="editorial-score grade-${esc(report.grade || 'warn')}">${Number(report.score) || 0}<small>/100</small></span>
+    </div>
+    <ul class="editorial-checks">${rows}</ul>
+    ${flags.length ? `<div class="risk-flags">${flags.map((f) => `<span title="${esc(f.note)}">${esc(f.term)}</span>`).join('')}</div>` : ''}
+    <p class="quality-note">Retention guess: ${esc((report.retention || {}).band || '—')} — ${esc((report.retention || {}).note || '')}</p>
+    ${suggestions ? `<details class="editorial-details"><summary>Notes for the next draft</summary><ul>${suggestions}</ul></details>` : ''}
+    ${variants ? `<details class="editorial-details"><summary>Hook starting points</summary><ul>${variants}</ul></details>` : ''}
+    <button class="btn small" data-act="editorial">Read again</button>
+  </div>`;
+}
+
+function localizationBlock(v) {
+  const items = Array.isArray(v.localizations) ? v.localizations : [];
+  const langs = LANG_OPTIONS.filter((l) => l.code !== (v.language || 'en'));
+  const done = new Set(items.filter((i) => i.status === 'ready').map((i) => i.language));
+  return `<div class="localize-block">
+    <span class="kicker">Languages</span>
+    <p class="quality-note">Translate the title, description and captions with your configured model. A localized voiceover is recorded only when a real voice is reachable.</p>
+    <div class="lang-chips">
+      ${langs.map((l) => `<button type="button" class="lang-chip ${done.has(l.code) ? 'done' : ''}"
+        data-lang="${esc(l.code)}" title="${esc(l.label)}">${esc(l.native)}${done.has(l.code) ? ' ✓' : ''}</button>`).join('')}
+    </div>
+    <label class="check-inline"><input type="checkbox" id="loc-voice" /> also record a localized voiceover</label>
+    <p class="loc-status quality-note" id="loc-status"></p>
+    ${items.length ? `<ul class="loc-list">${items.map((item) => `
+      <li class="loc-${esc(item.status)}">
+        <strong>${esc((LANG_OPTIONS.find((l) => l.code === item.language) || {}).native || item.language)}</strong>
+        <span>${esc(item.title || '')}</span>
+        ${item.srt_path ? `<a class="link" href="/api/videos/${v.id}/localization/${esc(item.language)}/captions" target="_blank" rel="noopener">captions</a>` : ''}
+        ${item.audio_path ? `<a class="link" href="/api/videos/${v.id}/localization/${esc(item.language)}/audio" target="_blank" rel="noopener">voiceover</a>` : ''}
+        ${item.note ? `<em>${esc(item.note)}</em>` : ''}
+      </li>`).join('')}</ul>` : ''}
+  </div>`;
+}
+
+async function localizeFilm(id, language) {
+  const status = $('#loc-status');
+  const voice = !!($('#loc-voice') && $('#loc-voice').checked);
+  if (status) status.textContent = `Translating into ${language}… this can take a little while.`;
+  try {
+    const out = await api(`/api/videos/${id}/localize`, { method: 'POST', body: { language, voice, wait: false } });
+    if (!out.ok) throw new Error(out.error || 'translation failed');
+    pollLocalization(id, language, 0);
+  } catch (exc) {
+    if (status) status.textContent = `That didn't land — ${exc.message}`;
+  }
+}
+
+function pollLocalization(id, language, tries) {
+  setTimeout(async () => {
+    try {
+      const data = await api(`/api/videos/${id}/localizations`);
+      const item = (data.items || []).find((x) => x.language === language);
+      if (item && ['ready', 'failed'].includes(item.status)) {
+        openDrawer(id);
+        refresh();
+        return;
+      }
+    } catch (_) {}
+    if (tries < 60) pollLocalization(id, language, tries + 1);
+    else {
+      const note = $('#loc-status');
+      if (note) note.textContent = 'Still working — reopen the film in a moment to see the result.';
+    }
+  }, 3000);
+}
+
+async function showRepurposePlan(id) {
+  const box = $('#clip-plan');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = '<p class="quality-note">Reading the narration for complete thoughts…</p>';
+  try {
+    const plan = await api(`/api/videos/${id}/repurpose`, { method: 'POST', body: { count: 3, dry_run: true } });
+    if (!plan.clips.length) {
+      box.innerHTML = `<p class="quality-note">${esc(plan.note || 'No fresh cuts found.')}</p>`;
+      return;
+    }
+    box.innerHTML = `
+      <span class="kicker">Candidate cuts</span>
+      <p class="quality-note">${esc(plan.note || '')}</p>
+      <div class="cut-list">
+        ${plan.clips.map((c, i) => `<div class="cut-row">
+          <div class="cut-meta">
+            <strong>${esc(c.title)}</strong>
+            <span>${fmtDur(c.duration)} · score ${c.score}</span>
+            <em>${esc(c.reason)}</em>
+          </div>
+          <button class="btn small" data-cut="${i}">Cut this</button>
+        </div>`).join('')}
+      </div>
+      <div class="cut-actions"><button class="btn primary small" data-cutall="1">Cut all ${plan.clips.length}</button></div>`;
+    box.querySelectorAll('[data-cut]').forEach((btn) => {
+      btn.addEventListener('click', () => cutClip(id, [plan.clips[Number(btn.dataset.cut)]]));
+    });
+    const all = box.querySelector('[data-cutall]');
+    if (all) all.addEventListener('click', () => cutClip(id, plan.clips));
+  } catch (exc) {
+    box.innerHTML = `<p class="error-note">${esc(exc.message)}</p>`;
+  }
+}
+
+async function cutClip(id, clips) {
+  const box = $('#clip-plan');
+  const before = (state.currentFilm && Array.isArray(state.currentFilm.clips)) ? state.currentFilm.clips.length : 0;
+  try {
+    const body = clips.length === 1
+      ? { count: 1, start: clips[0].start, end: clips[0].end }
+      : { count: clips.length };
+    await api(`/api/videos/${id}/repurpose`, { method: 'POST', body });
+    if (box) box.innerHTML = '<p class="quality-note">Queued. The camera is rolling on the vertical cut — the shelf will update when it lands.</p>';
+    pollClips(id, before, 0);
+  } catch (exc) {
+    if (box) box.innerHTML = `<p class="error-note">${esc(exc.message)}</p>`;
+  }
+}
+
+function pollClips(id, before, tries) {
+  setTimeout(async () => {
+    try {
+      const data = await api(`/api/videos/${id}/clips`);
+      if ((data.items || []).length > before) {
+        openDrawer(id);
+        refresh();
+        return;
+      }
+    } catch (_) {}
+    if (tries < 60) pollClips(id, before, tries + 1);
+  }, 3000);
 }
 
 function closeDrawer() {
@@ -395,9 +607,15 @@ async function drawerAction(act, id) {
   try {
     if (act === 'close') return closeDrawer();
     if (act === 'share') return showShareKit(id);
+    if (act === 'repurpose') return showRepurposePlan(id);
     if (act === 'replay') {
       const video = $('#drawer video');
       if (video) { video.scrollIntoView({ behavior: 'smooth' }); video.play(); }
+      return;
+    }
+    if (act === 'editorial') {
+      await api(`/api/videos/${id}/editorial?refresh=true`);
+      openDrawer(id);
       return;
     }
     if (act === 'publish') {
@@ -606,6 +824,7 @@ function switchView(view) {
   state.view = view;
   if (view === 'network') loadNetwork().catch(() => {});
   if (view === 'radar') loadRadar().catch(() => {});
+  if (view === 'settings') loadLibraryPanel().catch(() => {});
 }
 
 function renderYoutubePanel(status) {
@@ -1334,6 +1553,187 @@ async function loadBrain() {
 
 /* ---------- oauth client upload ---------- */
 
+/* ---------- the bell ---------- */
+
+const NOTIFICATIONS = { items: [], unread: 0, seen: null };
+
+async function loadNotifications() {
+  try {
+    const data = await api('/api/notifications?limit=40');
+    NOTIFICATIONS.items = data.items || [];
+    NOTIFICATIONS.unread = Number(data.unread) || 0;
+    renderBell();
+  } catch (_) {
+    /* the desk may be restarting */
+  }
+}
+
+function renderBell() {
+  const btn = $('#bell');
+  const count = $('#bell-count');
+  if (!btn || !count) return;
+  count.hidden = !NOTIFICATIONS.unread;
+  count.textContent = NOTIFICATIONS.unread > 9 ? '9+' : String(NOTIFICATIONS.unread);
+  btn.classList.toggle('has-news', NOTIFICATIONS.unread > 0);
+  if (NOTIFICATIONS.seen !== null && NOTIFICATIONS.unread > NOTIFICATIONS.seen) {
+    btn.classList.add('mark');
+    setTimeout(() => btn.classList.remove('mark'), 700);
+  }
+  NOTIFICATIONS.seen = NOTIFICATIONS.unread;
+
+  const list = $('#bell-list');
+  const note = $('#bell-note');
+  if (!list) return;
+  if (!NOTIFICATIONS.items.length) {
+    list.innerHTML = '';
+    note.hidden = false;
+    note.textContent = 'Quiet. The desk will ring when a film needs you.';
+    return;
+  }
+  note.hidden = true;
+  list.innerHTML = NOTIFICATIONS.items.map((n) => `
+    <li class="bell-item ${n.read ? 'is-read' : 'is-new'} level-${esc(n.level)}"
+        data-note="${n.id}" data-video="${esc(n.video_id || '')}" data-link="${esc(n.link || '')}">
+      <div class="bell-meta"><span class="bell-kind">${esc(n.kind)}</span><span>${esc(fmtWhen(n.ts))}</span></div>
+      <strong>${esc(n.title)}</strong>
+      ${n.body ? `<p>${esc(n.body)}</p>` : ''}
+    </li>`).join('');
+}
+
+function toggleBell(force) {
+  const panel = $('#bell-panel');
+  const btn = $('#bell');
+  if (!panel || !btn) return;
+  const open = force === undefined ? panel.hidden : force;
+  panel.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) loadNotifications();
+}
+
+async function openNotification(item) {
+  if (!item) return;
+  if (!Number(item.read)) {
+    try {
+      const out = await api('/api/notifications/read', { method: 'POST', body: { id: Number(item.dataset.note) } });
+      NOTIFICATIONS.unread = Number(out.unread) || 0;
+      loadNotifications();
+    } catch (_) {}
+  }
+  const video = item.dataset.video;
+  const link = item.dataset.link;
+  if (video) {
+    toggleBell(false);
+    openDrawer(video);
+  } else if (link) {
+    window.open(link, '_blank', 'noopener');
+  }
+}
+
+/* ---------- the archive (library) ---------- */
+
+let libraryPlan = null;
+
+async function loadLibraryPanel() {
+  const body = $('#library-body');
+  if (!body) return;
+  body.innerHTML = '<p class="quality-note">Counting what is on the shelf…</p>';
+  try {
+    const [report, plan] = await Promise.all([
+      api('/api/library/storage'),
+      api('/api/library/prune?days=60'),
+    ]);
+    libraryPlan = plan;
+    renderLibraryPanel(report, plan);
+  } catch (exc) {
+    body.innerHTML = `<p class="error-note">${esc(exc.message)}</p>`;
+  }
+}
+
+function renderLibraryPanel(report, plan) {
+  const body = $('#library-body');
+  if (!body) return;
+  const largest = (report.largest || []).filter((f) => f.bytes > 0).map((f) => `
+    <li><button class="link-btn" data-lib-open="${esc(f.id)}">${esc(f.title)}</button>
+      <span>${esc(f.kind)}</span><em>${fmtBytes(f.bytes)}</em></li>`).join('');
+  const orphans = (report.orphan_dirs || []).map((name) => `<span class="lang-chip">${esc(name)}</span>`).join('');
+  body.innerHTML = `
+    <div class="lib-stats">
+      <div><span>films</span><strong>${fmtNum(report.films)}</strong></div>
+      <div><span>vertical cuts</span><strong>${fmtNum(report.clips)}</strong></div>
+      <div><span>on disk</span><strong>${esc(report.on_disk_human)}</strong></div>
+      <div><span>database</span><strong>${fmtBytes(report.database_bytes)}</strong></div>
+      <div><span>exports</span><strong>${fmtBytes(report.exports_bytes)}</strong></div>
+      <div><span>free space</span><strong>${esc(report.free_human)}</strong></div>
+    </div>
+    ${largest ? `<ul class="lib-largest"><li class="lib-largest-head"><span>heaviest files</span><span></span><em></em></li>${largest}</ul>` : ''}
+    ${orphans ? `<p class="quality-note">Orphan folders (reported, never deleted): ${orphans}</p>` : ''}
+    <div class="lib-actions">
+      <label class="check-inline"><input type="checkbox" id="lib-media" /> include media in the export</label>
+      <button class="btn small" id="lib-export" type="button">Export catalogue</button>
+      <button class="btn small" id="lib-backup" type="button">Back up the database</button>
+    </div>
+    <p class="quality-note" id="lib-status"></p>
+    <div class="prune-box">
+      <div class="prune-head">
+        <span class="kicker">Guarded prune</span>
+        <label for="lib-days">older than <input id="lib-days" type="number" min="1" max="3650" value="${Number(plan.days) || 60}" /> days</label>
+        <button class="btn small" id="lib-preview" type="button">Preview</button>
+      </div>
+      <p class="quality-note">${esc(plan.note || 'Only archived or failed films are listed.')}</p>
+      <ul class="prune-list" id="lib-prune-list">${(plan.candidates || []).map((c) => `
+        <li>
+          <label class="check-inline"><input type="checkbox" data-prune-id="${esc(c.id)}" checked />
+            <strong>${esc(c.title)}</strong></label>
+          <span>${esc(c.kind)} · ${esc(c.status)} · ${c.files} file${c.files === 1 ? '' : 's'}</span>
+          <em>${esc(c.human)}</em>
+        </li>`).join('') || '<li class="prune-empty">Nothing is old enough to prune. The shelf is safe.</li>'}</ul>
+      <div class="prune-actions" id="lib-prune-actions">
+        ${(plan.candidates || []).length ? `<button class="btn danger small" id="lib-prune" type="button">Remove selected · ${esc(plan.total_human)}</button>` : ''}
+      </div>
+    </div>`;
+
+  body.querySelectorAll('[data-lib-open]').forEach((el) => {
+    el.addEventListener('click', () => { switchView('desk'); openDrawer(el.dataset.libOpen); });
+  });
+  $('#lib-export').addEventListener('click', () => libraryAction('export'));
+  $('#lib-backup').addEventListener('click', () => libraryAction('backup'));
+  $('#lib-preview').addEventListener('click', () => loadLibraryPanel());
+  const prune = $('#lib-prune');
+  if (prune) prune.addEventListener('click', () => libraryAction('prune'));
+}
+
+async function libraryAction(kind) {
+  const status = $('#lib-status');
+  const say = (text) => { if (status) status.textContent = text; };
+  try {
+    if (kind === 'export') {
+      say('Packing the catalogue… large media can take a moment.');
+      const out = await api('/api/library/export', { method: 'POST', body: { include_media: !!($('#lib-media') && $('#lib-media').checked) } });
+      say(`Exported ${out.films} film(s) to ${out.path} · ${out.human}${out.media_files ? ` · ${out.media_files} media files` : ''}`);
+      loadNotifications();
+    }
+    if (kind === 'backup') {
+      say('Copying the database…');
+      const out = await api('/api/library/backup', { method: 'POST', body: {} });
+      say(`Backed up to ${out.path} · ${out.human}${out.removed ? ` · ${out.removed} old backup removed` : ''}`);
+      loadNotifications();
+    }
+    if (kind === 'prune') {
+      const days = Number(($('#lib-days') || {}).value) || 60;
+      const ids = Array.from(document.querySelectorAll('[data-prune-id]:checked')).map((el) => el.dataset.pruneId);
+      if (!ids.length) { say('Nothing is selected for pruning.'); return; }
+      if (!window.confirm(`Remove ${ids.length} archived or failed film(s)? This deletes their files on disk and cannot be undone.`)) return;
+      const out = await api('/api/library/prune', { method: 'POST', body: { days, ids, apply: true, confirm: true } });
+      alert(`Removed ${out.removed_records} record(s) and reclaimed ${out.removed_human}.`);
+      loadLibraryPanel();
+      loadNotifications();
+      refresh();
+    }
+  } catch (exc) {
+    say(`That didn't work — ${exc.message}`);
+  }
+}
+
 async function installClientSecret(file) {
   if (!file) return;
   try {
@@ -1379,6 +1779,7 @@ async function refresh() {
       renderSettings(await api('/api/settings'));
     }
     await loadVideos();
+    await loadNotifications();
     if (state.view === 'network') loadNetwork().catch(() => {});
     if (state.view === 'radar') loadRadar().catch(() => {});
   } catch (_) {
@@ -1474,6 +1875,33 @@ $('#journal-refresh').addEventListener('click', async () => {
 
 $('#channel-veil').addEventListener('click', closeChannelModal);
 $('#secret-file').addEventListener('change', (ev) => installClientSecret(ev.target.files[0]));
+
+/* ---------- the bell wiring ---------- */
+
+$('#bell') && $('#bell').addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  toggleBell();
+});
+
+$('#bell-panel') && $('#bell-panel').addEventListener('click', (ev) => {
+  const item = ev.target.closest('[data-note]');
+  if (item) openNotification(item);
+});
+
+$('#bell-read-all') && $('#bell-read-all').addEventListener('click', async (ev) => {
+  ev.stopPropagation();
+  try {
+    await api('/api/notifications/read', { method: 'POST', body: { id: 0 } });
+    loadNotifications();
+  } catch (_) {}
+});
+
+document.addEventListener('click', (ev) => {
+  const panel = $('#bell-panel');
+  if (!panel || panel.hidden) return;
+  if (ev.target.closest('#bell-panel') || ev.target.closest('#bell')) return;
+  toggleBell(false);
+});
 
 /* ---------- radar wiring ---------- */
 

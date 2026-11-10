@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import content, publish, quality
+from . import content, editorial, publish, quality, repurpose
 from .channels import channel_by_id, primary_channel
 from .config import Config
 from .db import Database
@@ -71,6 +71,8 @@ class Studio:
         self._stop.clear()
         recovered = 0
         for video in self.db.list_videos(limit=200, include_archived=False):
+            if (video.get("kind") or "film") == "clip":
+                continue
             if video["status"] in {"queued", "drafting"}:
                 self._jobs.put(("produce", video["id"], {
                     "fmt": video.get("format") or "short",
@@ -192,10 +194,58 @@ class Studio:
         return report
 
 
+    def repurpose(self, video_id: str, count: int = 3, start: float | None = None,
+                  end: float | None = None, dry_run: bool = False) -> dict[str, Any]:
+        """Plan (and unless dry-run, queue) vertical cuts from a finished film."""
+        video = self.db.get_video(video_id)
+        if not video:
+            raise ValueError(f"No film with id {video_id}.")
+        if not video.get("video_path") or not Path(str(video["video_path"])).is_file():
+            raise ValueError("That film has no rendered file to cut from yet.")
+        narration = publish.load_narration(video)
+        siblings = [self.db.get_video(clip["id"]) for clip in self.db.list_clips(video_id)]
+        siblings = [s for s in siblings if s]
+
+        if (start is None) != (end is None):
+            raise ValueError("Give both a start and an end, or neither.")
+        if start is not None and end is not None:
+            candidate = repurpose.candidate_from_range(video, narration, float(start), float(end))
+            clips = [candidate.as_dict()]
+            note = "Hand-cut range."
+        else:
+            result = repurpose.plan(video, narration, count=count, avoid=siblings)
+            clips = result["candidates"]
+            note = result.get("note", "")
+
+        existing = {
+            str((s.get("brief") or {}).get("clip", {}).get("digest") or "")
+            for s in siblings
+        }
+        clips = [c for c in clips if c["digest"] not in existing]
+        if not clips:
+            return {"id": video_id, "queued": False, "clips": [], "note": note or "No fresh cuts found."}
+        if dry_run:
+            return {"id": video_id, "queued": False, "clips": clips, "note": note}
+        self._jobs.put(("repurpose", video_id, {"clips": clips}))
+        self.bus.emit(
+            "repurpose",
+            f"Cutting {len(clips)} vertical clip{'s' if len(clips) != 1 else ''} from "
+            f"“{video.get('title', 'a film')}”.",
+            video_id=video_id,
+        )
+        return {"id": video_id, "queued": True, "clips": clips, "note": note}
+
     def retry(self, video_id: str) -> dict[str, Any]:
         video = self.db.get_video(video_id)
         if not video:
             raise ValueError(f"No film with id {video_id}.")
+        if (video.get("kind") or "film") == "clip":
+            clip = (video.get("brief") or {}).get("clip") or {}
+            parent = self.db.get_video(str(video.get("parent_id") or ""))
+            if parent and clip.get("start") is not None and clip.get("end") is not None:
+                self.db.update_video(video_id, archived=1, status="failed")
+                self._jobs.put(("repurpose", parent["id"], {"clips": [clip]}))
+                return {"id": parent["id"], "status": "clip requeued"}
         self.db.update_video(video_id, status="queued", stage="queued", progress=0, error="")
         self._jobs.put(("produce", video_id, {
             "fmt": video.get("format") or "short",
@@ -219,6 +269,8 @@ class Studio:
                     self._produce(video_id, **kwargs)
                 elif kind == "publish":
                     self._publish(video_id, **kwargs)
+                elif kind == "repurpose":
+                    self._repurpose(video_id, **kwargs)
             except YouTubeError as exc:
                 # The film itself is fine; only the hand-off failed.
                 self.db.update_video(
@@ -228,9 +280,19 @@ class Studio:
                 self.bus.emit(
                     "youtube", f"Upload set aside: {exc}", level="warning", video_id=video_id
                 )
+                self.bus.notify(
+                    "Upload set aside",
+                    f"“{(self.db.get_video(video_id) or {}).get('title', 'A film')}” stayed on the shelf: {exc}",
+                    kind="publish", level="warning", video_id=video_id,
+                )
             except Exception as exc:
                 self.db.update_video(video_id, status="failed", error=str(exc)[:2000], progress=100)
                 self.bus.emit("studio", f"Film abandoned: {exc}", level="error", video_id=video_id)
+                self.bus.notify(
+                    "A film was abandoned",
+                    str(exc)[:300],
+                    kind="failure", level="error", video_id=video_id,
+                )
                 self._record_failure()
             finally:
                 with self._lock:
@@ -384,10 +446,24 @@ class Studio:
         self._reset_failures()
 
         film = self.db.get_video(video_id) or {}
+        self.db.update_video(
+            video_id,
+            editorial=editorial.analyze_video(film),
+        )
         report = quality.inspect(self.cfg, film, channel)
         self.db.update_video(video_id, quality=report)
+        self.bus.notify(
+            f"“{script['title']}” is ready",
+            f"{brand} · {rendered.duration:.0f}s · {quality.summary(report)}",
+            kind="film", level="success", video_id=video_id,
+        )
         if not quality.passes(report):
             self.db.update_video(video_id, stage="blocked")
+            self.bus.notify(
+                f"“{script['title']}” was held by the gate",
+                quality.summary(report),
+                kind="quality", level="warning", video_id=video_id,
+            )
             self.db.add_journal(
                 channel_id,
                 f"“{script['title']}” was held back by the quality gate.",
@@ -424,6 +500,11 @@ class Studio:
                 level="warning",
                 video_id=video_id,
             )
+            self.bus.notify(
+                f"“{script['title']}” needs approval",
+                f"{brand} is set to review. Approve the film to send it to the upload desk.",
+                kind="approval", level="warning", video_id=video_id,
+            )
             return
 
         account = self._account(channel_id)
@@ -441,6 +522,141 @@ class Studio:
                     level="warning",
                     video_id=video_id,
                 )
+
+    def _repurpose(self, video_id: str, clips: list[dict[str, Any]] | None = None) -> None:
+        source = self.db.get_video(video_id)
+        if not source or not source.get("video_path"):
+            raise ValueError(f"Film {video_id} has no rendered file to cut from.")
+        source_path = Path(str(source["video_path"]))
+        if not source_path.is_file():
+            raise ValueError(f"The rendered file for {video_id} is missing.")
+        narration = publish.load_narration(source)
+        words = narration.get("words") if isinstance(narration.get("words"), list) else []
+        channel = channel_by_id(self.cfg, self.db, source.get("channel_id")) or {}
+        width, height = (int(v) for v in self.cfg.get("render.short", [1080, 1920]))
+        existing = {
+            str((clip.get("brief") or {}).get("clip", {}).get("digest") or "")
+            for clip in (self.db.get_video(child["id"]) for child in self.db.list_clips(video_id))
+            if clip
+        }
+
+        made: list[str] = []
+        total = max(1, len(clips or []))
+        for index, clip in enumerate(clips or []):
+            if str(clip.get("digest") or "") in existing:
+                continue
+            self.bus.step(
+                video_id, "repurpose",
+                f"Cutting vertical clip {index + 1}/{total}: “{clip.get('title', '')}”.",
+                60 + int((index / total) * 30),
+            )
+            child_id = new_video_id()
+            child_dir = self.cfg.video_dir(child_id)
+            rendered = repurpose.render_clip(
+                source_path,
+                child_dir / "clip.mp4",
+                float(clip.get("start") or 0.0),
+                float(clip.get("end") or 0.0),
+                words=words or None,
+                width=width,
+                height=height,
+                fps=int(self.cfg.get("render.fps", 30)),
+                crf=int(self.cfg.get("render.crf", 20)),
+            )
+            title = str(clip.get("title") or "A quiet cut")[:120]
+            text = str(clip.get("text") or "").strip()
+            source_title = str(source.get("title") or "a film")
+            url = str(source.get("youtube_url") or "").strip()
+            description = text[:1500]
+            description += f"\n\nCut from “{source_title}”"
+            description += f": {url}" if url else "."
+            if len(description) < 160:
+                description += (
+                    "\n\nOne complete thought, lifted from the full film and reframed for "
+                    "vertical feeds. The full piece is on the channel."
+                )
+            tag_pool = list(source.get("tags") or []) + [
+                "shorts", "vertical", source.get("niche") or "", channel.get("name") or "",
+            ]
+            tags: list[str] = []
+            for tag in tag_pool:
+                clean = str(tag or "").strip().lower()
+                if 2 < len(clean) <= 60 and clean not in tags:
+                    tags.append(clean)
+            script = {
+                "title": title,
+                "hook": str(clip.get("hook") or text[:240]),
+                "description": description,
+                "tags": tags[:20],
+                "segments": [{"heading": "", "text": text}],
+                "narration": text,
+            }
+            brief = {
+                "clip": {
+                    **clip,
+                    "source_id": video_id,
+                    "source_title": source_title,
+                }
+            }
+            self.db.create_video({
+                "id": child_id,
+                "format": "short",
+                "kind": "clip",
+                "parent_id": video_id,
+                "language": source.get("language") or "en",
+                "channel_id": source.get("channel_id") or "",
+                "niche": source.get("niche") or "",
+                "style": source.get("style") or "",
+                "title": title,
+                "description": description,
+                "tags": tags[:20],
+                "hook": script["hook"],
+                "script": script,
+                "brief": brief,
+                "fingerprint": {},
+                "novelty": float(source.get("novelty") or 1.0),
+                "duration": rendered.duration,
+                "words": len(text.split()),
+                "status": "ready",
+                "stage": "ready",
+                "progress": 100,
+                "video_path": str(rendered.path),
+                "thumb_path": str(rendered.thumb) if rendered.thumb else "",
+                "captions_path": str(rendered.captions) if rendered.captions else "",
+                "bytes": rendered.bytes,
+                "clip_start": float(clip.get("start") or 0.0),
+                "clip_end": float(clip.get("end") or 0.0),
+                "editorial": editorial.analyze(
+                    script, title=title, duration=rendered.duration, fmt="short"
+                ),
+            })
+            film = self.db.get_video(child_id) or {}
+            report = quality.inspect(self.cfg, film, channel)
+            self.db.update_video(child_id, quality=report)
+            if not quality.passes(report):
+                self.db.update_video(child_id, stage="blocked")
+            made.append(child_id)
+
+        if not made:
+            self.bus.emit(
+                "repurpose",
+                f"No fresh vertical cuts could be made from “{source.get('title', 'that film')}”.",
+                level="warning",
+                video_id=video_id,
+            )
+            return
+        self.bus.emit(
+            "repurpose",
+            f"{len(made)} vertical cut{'s' if len(made) != 1 else ''} ready from "
+            f"“{source.get('title', 'a film')}”.",
+            level="success",
+            video_id=made[0],
+        )
+        self.bus.notify(
+            f"{len(made)} vertical cut{'s' if len(made) != 1 else ''} ready",
+            f"From “{source.get('title', 'a film')}”. Open them from the shelf and publish as Shorts or Reels.",
+            kind="clip", level="success", video_id=made[0],
+        )
 
     def _account(self, channel_id: str | None) -> Any:
         if hasattr(self.youtube, "account"):
@@ -515,6 +731,12 @@ class Studio:
             f"“{video.get('title', 'Film')}” is on {channel_name}: {result['youtube_url']}",
             level="success",
             video_id=video_id,
+        )
+        self.bus.notify(
+            f"Published on {channel_name}",
+            f"“{video.get('title', 'Film')}” is live at {result['youtube_url']}",
+            kind="publish", level="success", video_id=video_id,
+            link=str(result.get("youtube_url") or ""),
         )
 
     # -- failure bookkeeping --------------------------------------------

@@ -19,6 +19,14 @@ def test_host_without_scheme_gains_one(monkeypatch):
     assert llm._ollama_host() == DEFAULT_HOST
 
 
+def test_local_ollama_client_ignores_proxy_config(monkeypatch):
+    # A malformed NO_PROXY entry (e.g. bracketed IPv6) must not break a local
+    # Ollama call before the socket is opened.
+    monkeypatch.setenv("NO_PROXY", "[::1],::1")
+    with llm._local_client(0.1) as client:
+        assert client.trust_env is False
+
+
 def test_provider_errors_become_llm_errors(cfg, monkeypatch):
     cfg.set("script.provider", "ollama")
     monkeypatch.setattr(llm, "_ollama_host", lambda: "http://::1:11434")

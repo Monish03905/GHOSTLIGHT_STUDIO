@@ -108,6 +108,8 @@ State, films and OAuth tokens live in `./data` and `./secrets` on the host. The 
 | `python -m ghostlight serve` | Web desk + the autonomous scheduler |
 | `python -m ghostlight make --format long --topic "the physics of honey"` | Produce one film now and watch the log |
 | `python -m ghostlight upload [--id …]` | Publish the newest ready film (runs the gate first) |
+| `python -m ghostlight clips --id … [--count 3] [--dry-run]` | Preview or queue vertical cuts from a finished film |
+| `python -m ghostlight backup` | Write a timestamped SQLite backup into `data/backups/` |
 | `python -m ghostlight status` | The state of the studio |
 | `python -m ghostlight log -n 50` | The desk log |
 | `python -m ghostlight connect` | Link a YouTube channel |
@@ -164,11 +166,13 @@ The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it,
 
 | Tab | What lives there |
 |---|---|
-| **Today** | Queue, films in flight, the desk log (server-sent events), and one-click commissions |
-| **The Radar** | Scored trends per niche, the idea wall, the content calendar, and the AI brain's current reading |
+| **The Desk** | Queue, films in flight, the desk log (server-sent events), and one-click commissions |
 | **The Network** | Channel cards, editorial journal, the next planned film per voice, and *Add a voice* |
-| **Growth** | Views, watch hours, subscribers and revenue — from YouTube Analytics when linked, public stats otherwise |
-| **Settings** | The knobs, voice and provider status, and the Google key |
+| **The Radar** | Scored trends per niche, the idea wall, the content calendar, and the AI brain's current reading |
+| **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, gate, editorial read, clips, languages, share kit and publishing |
+| **The knobs** | Settings, YouTube key and schedule, plus **The archive**: storage, export, backup and a guarded prune |
+
+The bell in the masthead keeps durable notices — finished films, gate blocks, review requests, publications, failed localizations, exports and prunes. It survives restarts; the desk log is the transient stream beside it.
 
 <details>
 <summary><b>Installable, offline-aware shell</b></summary>
@@ -276,6 +280,16 @@ Every publish produces the whole package, not just a video:
 - Optional **first comment**, a **share kit** (`GET /api/videos/{id}/share`) and a Discord-compatible **webhook**
 - An **RSS feed** at `/feed.xml` for the public shelf
 - `status.containsSyntheticMedia` set on every upload when `youtube.disclose_ai` is on
+
+### After the film: cuts, languages, notes
+
+| Tool | Where | What it does |
+|---|---|---|
+| **Vertical cuts** | Film drawer → *Cut vertical clips* | Reads `narration.json`, proposes 15–60 s complete-thought windows with structural scores, avoids overlaps and existing cuts, then renders 1080 × 1920 clips with blurred fill, fitted foreground and burned-in captions. Each cut is a child film, so the shelf, gate, approval, share kit and upload work unchanged. `python -m ghostlight clips --id … --dry-run` previews from the terminal. |
+| **Languages** | Film drawer → *Languages* | Translates title, hook, description, tags and every spoken segment into Hindi, Telugu, Tamil, Spanish, French, German or Portuguese using your configured model. Segment counts are validated and unchanged text is rejected. Captions keep original timings; a localized voiceover is recorded only when `edge-tts` is reachable, and the record names the real provider or says why it was skipped. |
+| **Editorial read** | Film drawer → *Editorial read* | A deterministic second read — hook, pacing, clarity, payoff, invitation, repetition, structure and rights flags — with a score, notes and hook starting points. It calls no model and labels its retention band as a structural guess. Every film is read automatically after rendering. |
+| **The bell** | Masthead | Durable notifications for ready films, blocked gates, review requests, publications, localization failures, exports and prunes. Click a notice to open its film. |
+| **The archive** | The knobs → *The archive* | Storage report (tracked vs on-disk, free space, largest files, orphan folders), catalogue ZIP with JSON/CSV and optional media, a safe SQLite backup, and a preview-first prune. Pruning requires a confirm and only touches archived or failed films inside the studio's own video directory. |
 
 ### Linking YouTube
 
@@ -387,7 +401,7 @@ A local Ollama server needs no key and no configuration; the largest installed m
 ## HTTP API
 
 <details>
-<summary><b>44 endpoints, grouped</b></summary>
+<summary><b>59 endpoints, grouped</b></summary>
 
 **Desk and state**
 
@@ -395,7 +409,9 @@ A local Ollama server needs no key and no configuration; the largest installed m
 |---|---|
 | GET | `/api/health`, `/api/status`, `/api/settings` |
 | GET | `/api/events`, `/api/stream` (SSE), `/api/journal`, `/api/growth` |
-| POST | `/api/command`, `/api/generate` |
+| GET | `/api/notifications` (`?unread=true`), `/api/library/storage`, `/api/library/prune` |
+| POST | `/api/command`, `/api/generate`, `/api/notifications/read` |
+| POST | `/api/library/export`, `/api/library/backup`, `/api/library/prune` |
 
 **Ideas, radar and calendar**
 
@@ -408,10 +424,13 @@ A local Ollama server needs no key and no configuration; the largest installed m
 
 | Method | Path |
 |---|---|
-| GET | `/api/videos`, `/api/videos/{id}` |
+| GET | `/api/videos` (`?kind=clip`, `?language=`, `?parent_id=`), `/api/videos/{id}` |
 | GET | `/api/videos/{id}/quality` (`?refresh=true`), `/api/videos/{id}/share` |
-| GET | `/api/videos/{id}/file/{kind}` (`video`, `thumb`, `poster`, `captions`, `audio`; `?variant=` for thumbs) |
+| GET | `/api/videos/{id}/editorial`, `/clips`, `/localizations` |
+| GET | `/api/videos/{id}/file/{kind}` (`video`, `thumb`, `poster`, `captions`; `?variant=` for thumbs) |
+| GET | `/api/videos/{id}/localization/{language}/{kind}` (`captions`, `audio`) |
 | POST | `/api/videos/{id}/publish`, `/approve`, `/retry`, `/archive`, `/thumbnail` |
+| POST | `/api/videos/{id}/repurpose` (`count`, optional `start`/`end`, `dry_run`), `/localize` (`language`, `voice`, `wait`) |
 
 **Channels and schedule**
 
@@ -453,7 +472,7 @@ Completing Google's consent screen is treated as your explicit go-ahead: that ch
 
 ### Deliberately not built
 
-Instagram/TikTok publishing, a multilingual pipeline, long-to-short repurposing, and a multi-tenant SaaS layer are **not** in this repository. The module-by-module map, including those boundaries, is in **[docs/PLATFORM.md](docs/PLATFORM.md)**.
+Instagram/TikTok/Facebook uploads, multi-tenant SaaS billing, voice cloning, avatars or lip-sync, and automated fact-checking are **not** in this repository. Each needs an app review, a paid provider, licence consent, or a tenancy and payments layer that a local studio cannot honestly fake. Localization needs a configured language model; localized audio additionally needs `edge-tts` and network access. The module-by-module map, including every one of these boundaries, is in **[docs/PLATFORM.md](docs/PLATFORM.md)**.
 
 ### On monetization
 
@@ -480,11 +499,14 @@ ghostlight/
   visuals.py       procedural art engine             captions.py      ASS karaoke lettering
   trends.py        trend shelf + live RSS layer      ideas.py         the idea wall
   quality.py       pre-upload inspection              render.py        ffmpeg composition + stills
+  editorial.py     deterministic script read           languages.py     localization + local voices
+  repurpose.py     vertical cuts from word timings     library.py       storage, export, backup, prune
 web/               dashboard + PWA shell (no build step)
   index.html  app.js  styles.css  sw.js  manifest.webmanifest  icons/
 scripts/           make_icons.py for the PWA assets
 docs/              GOOGLE_SETUP.md · MONETIZATION.md · PLATFORM.md · assets/
-tests/             58 tests across the engine, the gate and the API
+tests/             97 tests across the engine, the gate, the API, repurposing, localization,
+                   editorial reads, notifications and the library
 .github/           CI: pytest on Python 3.12 with ffmpeg
 ```
 </details>
@@ -498,7 +520,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate, thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, and the studio orchestration. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
+The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate, thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation, the editorial read, durable notifications, and the library's export, backup and guarded prune. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
 
 <div align="center">
 <br>

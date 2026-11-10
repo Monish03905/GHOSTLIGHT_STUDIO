@@ -179,7 +179,12 @@ def build_metadata(cfg: Config, video: dict[str, Any], channel: dict[str, Any],
 
 
 def load_narration(video: dict[str, Any]) -> dict[str, Any]:
-    path = Path(str(video.get("narration_path") or ""))
+    raw = str(video.get("narration_path") or "").strip()
+    if not raw:
+        return {}
+    path = Path(raw)
+    if not path.name:
+        return {}
     meta = path.with_name("narration.json")
     if not meta.is_file():
         return {}

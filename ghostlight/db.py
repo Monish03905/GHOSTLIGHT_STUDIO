@@ -46,9 +46,18 @@ VIDEO_COLUMNS = {
     "archived",
     "quality",
     "thumb_variants",
+    "kind",
+    "parent_id",
+    "language",
+    "editorial",
+    "clip_start",
+    "clip_end",
 }
 
-JSON_COLUMNS = {"tags", "script", "brief", "fingerprint", "upload_meta", "quality", "thumb_variants"}
+JSON_COLUMNS = {
+    "tags", "script", "brief", "fingerprint", "upload_meta", "quality",
+    "thumb_variants", "editorial",
+}
 
 CHANNEL_COLUMNS = {
     "id", "created_at", "updated_at", "name", "slug", "tagline", "persona",
@@ -98,7 +107,13 @@ CREATE TABLE IF NOT EXISTS videos (
     error TEXT DEFAULT '',
     archived INTEGER DEFAULT 0,
     quality TEXT DEFAULT '{}',
-    thumb_variants TEXT DEFAULT '[]'
+    thumb_variants TEXT DEFAULT '[]',
+    kind TEXT DEFAULT 'film',
+    parent_id TEXT DEFAULT '',
+    language TEXT DEFAULT 'en',
+    editorial TEXT DEFAULT '{}',
+    clip_start REAL DEFAULT 0,
+    clip_end REAL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
@@ -189,6 +204,37 @@ CREATE TABLE IF NOT EXISTS journal (
     body TEXT DEFAULT '',
     data TEXT DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'note',
+    level TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    body TEXT DEFAULT '',
+    video_id TEXT DEFAULT '',
+    link TEXT DEFAULT '',
+    read INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read, id DESC);
+
+CREATE TABLE IF NOT EXISTS localizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL,
+    language TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ready',
+    title TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    tags TEXT DEFAULT '[]',
+    srt_path TEXT DEFAULT '',
+    audio_path TEXT DEFAULT '',
+    provider TEXT DEFAULT '',
+    voice TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(video_id, language)
+);
 """
 
 
@@ -225,6 +271,17 @@ def _decode_row(row: sqlite3.Row | None, full: bool = True) -> dict[str, Any] | 
     return item
 
 
+def _decode_localization(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["tags"] = json.loads(item.get("tags") or "[]")
+    except json.JSONDecodeError:
+        item["tags"] = []
+    return item
+
+
 class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -234,8 +291,9 @@ class Database:
             conn.executescript(SCHEMA)
             self._ensure_columns(conn)
             self._ensure_channel_columns(conn)
-            # Index after migration: older databases gain channel_id above.
+            # Indexes after migration: older databases gain these columns above.
             conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_channel ON videos(channel_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_parent ON videos(parent_id)")
 
     @staticmethod
     def _ensure_columns(conn: sqlite3.Connection) -> None:
@@ -247,6 +305,12 @@ class Database:
             "channel_id": "TEXT DEFAULT ''",
             "quality": "TEXT DEFAULT '{}'",
             "thumb_variants": "TEXT DEFAULT '[]'",
+            "kind": "TEXT DEFAULT 'film'",
+            "parent_id": "TEXT DEFAULT ''",
+            "language": "TEXT DEFAULT 'en'",
+            "editorial": "TEXT DEFAULT '{}'",
+            "clip_start": "REAL DEFAULT 0",
+            "clip_end": "REAL DEFAULT 0",
         }
         for name, ddl in additions.items():
             if name not in existing:
@@ -320,6 +384,9 @@ class Database:
         status: str | None = None,
         include_archived: bool = False,
         channel_id: str | None = None,
+        kind: str | None = None,
+        language: str | None = None,
+        parent_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -332,6 +399,15 @@ class Database:
         if channel_id:
             clauses.append("channel_id = ?")
             params.append(channel_id)
+        if kind:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if language:
+            clauses.append("language = ?")
+            params.append(language)
+        if parent_id:
+            clauses.append("parent_id = ?")
+            params.append(parent_id)
         if not include_archived:
             clauses.append("archived = 0")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -345,6 +421,29 @@ class Database:
 
     def archive_video(self, video_id: str, archived: bool = True) -> None:
         self.update_video(video_id, archived=1 if archived else 0)
+
+    def delete_video(self, video_id: str) -> None:
+        with self._write_lock, self._connect() as conn:
+            conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+            conn.execute("DELETE FROM video_metrics WHERE video_id = ?", (video_id,))
+            conn.execute("DELETE FROM localizations WHERE video_id = ?", (video_id,))
+
+    def all_video_rows(self, limit: int = 5000) -> list[dict[str, Any]]:
+        """Every film row, archived included, for the library and maintenance desk."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, parent_id, kind, language, title, status, stage, format, niche, "
+                "channel_id, duration, bytes, archived, created_at, updated_at, published_at, "
+                "video_path, poster_path, thumb_path, captions_path, narration_path, music_path, "
+                "youtube_url FROM videos ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(limit, 20000)),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_clips(self, parent_id: str, include_archived: bool = True) -> list[dict[str, Any]]:
+        return self.list_videos(
+            limit=60, parent_id=parent_id, kind="clip", include_archived=include_archived
+        )
 
     def all_fingerprints(self, limit: int = 5000) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -592,6 +691,108 @@ class Database:
             out.append(item)
         return out
 
+    # -- notifications --------------------------------------------------
+    def add_notification(
+        self,
+        title: str,
+        body: str = "",
+        kind: str = "note",
+        level: str = "info",
+        video_id: str = "",
+        link: str = "",
+    ) -> dict[str, Any]:
+        ts = utcnow()
+        with self._write_lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO notifications (ts, kind, level, title, body, video_id, link) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (ts, kind, level, title[:200], body[:1000], video_id, link),
+            )
+            notification_id = int(cur.lastrowid or 0)
+        return {
+            "id": notification_id, "ts": ts, "kind": kind, "level": level,
+            "title": title, "body": body, "video_id": video_id, "link": link, "read": 0,
+        }
+
+    def list_notifications(self, limit: int = 40, unread_only: bool = False) -> list[dict[str, Any]]:
+        where = "WHERE read = 0" if unread_only else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM notifications {where} ORDER BY id DESC LIMIT ?",
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def unread_notifications(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM notifications WHERE read = 0").fetchone()
+        return int(row["n"]) if row else 0
+
+    def mark_notification(self, notification_id: int) -> int:
+        with self._write_lock, self._connect() as conn:
+            if notification_id:
+                cur = conn.execute("UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,))
+            else:
+                cur = conn.execute("UPDATE notifications SET read = 1 WHERE read = 0")
+            return int(cur.rowcount or 0)
+
+    # -- localizations --------------------------------------------------
+    def upsert_localization(self, video_id: str, language: str, values: dict[str, Any]) -> dict[str, Any]:
+        now = utcnow()
+        payload = {
+            "video_id": video_id,
+            "language": language,
+            "status": str(values.get("status") or "ready"),
+            "title": str(values.get("title") or ""),
+            "description": str(values.get("description") or ""),
+            "tags": _encode(values.get("tags") or []),
+            "srt_path": str(values.get("srt_path") or ""),
+            "audio_path": str(values.get("audio_path") or ""),
+            "provider": str(values.get("provider") or ""),
+            "voice": str(values.get("voice") or ""),
+            "note": str(values.get("note") or "")[:1000],
+        }
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO localizations (video_id, language, status, title, description, tags, "
+                "srt_path, audio_path, provider, voice, note, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(video_id, language) DO UPDATE SET status=excluded.status, "
+                "title=excluded.title, description=excluded.description, tags=excluded.tags, "
+                "srt_path=excluded.srt_path, audio_path=excluded.audio_path, "
+                "provider=excluded.provider, voice=excluded.voice, note=excluded.note, "
+                "updated_at=excluded.updated_at",
+                (
+                    payload["video_id"], payload["language"], payload["status"], payload["title"],
+                    payload["description"], payload["tags"], payload["srt_path"], payload["audio_path"],
+                    payload["provider"], payload["voice"], payload["note"], now, now,
+                ),
+            )
+        return self.get_localization(video_id, language) or {}
+
+    def get_localization(self, video_id: str, language: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM localizations WHERE video_id = ? AND language = ?",
+                (video_id, language),
+            ).fetchone()
+        return _decode_localization(row)
+
+    def list_localizations(self, video_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM localizations WHERE video_id = ? ORDER BY language ASC",
+                (video_id,),
+            ).fetchall()
+        return [item for item in (_decode_localization(r) for r in rows) if item]
+
+    def delete_localization(self, video_id: str, language: str) -> None:
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                "DELETE FROM localizations WHERE video_id = ? AND language = ?",
+                (video_id, language),
+            )
+
     # -- preferences ----------------------------------------------------
     def set_pref(self, key: str, value: Any) -> None:
         with self._write_lock, self._connect() as conn:
@@ -732,6 +933,10 @@ class Database:
                 row["format"]: int(row["n"])
                 for row in conn.execute("SELECT format, COUNT(*) AS n FROM videos GROUP BY format")
             }
+            kinds = {
+                (row["kind"] or "film"): int(row["n"])
+                for row in conn.execute("SELECT COALESCE(kind, 'film') AS kind, COUNT(*) AS n FROM videos GROUP BY kind")
+            }
             last = conn.execute(
                 "SELECT youtube_url, updated_at FROM videos WHERE status = 'published' "
                 "ORDER BY updated_at DESC LIMIT 1"
@@ -741,6 +946,8 @@ class Database:
             "total": total,
             "by_status": by_status,
             "by_format": formats,
+            "by_kind": kinds,
+            "clips": kinds.get("clip", 0),
             "seconds": round(float(totals["seconds"] or 0), 1),
             "minutes": round(float(totals["seconds"] or 0) / 60, 1),
             "words": int(totals["words"] or 0),
