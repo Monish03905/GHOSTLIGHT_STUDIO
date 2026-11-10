@@ -481,6 +481,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         item["metrics"] = db.get_metrics(video_id)
         item["clips"] = db.list_clips(video_id)
         item["localizations"] = db.list_localizations(video_id)
+        narration = publish.load_narration(item)
+        chapters = []
+        for segment in (narration.get("segments") or [])[:24]:
+            start = float(segment.get("start") or 0)
+            end = float(segment.get("end") or 0)
+            if end <= start:
+                continue
+            label = str(segment.get("heading") or "").strip()
+            if not label:
+                label = " ".join(str(segment.get("text") or "").split()[:6]).strip(" .,;:—-")
+            chapters.append({
+                "start": round(start, 2),
+                "end": round(end, 2),
+                "label": (label or f"Scene {len(chapters) + 1}")[:70],
+            })
+        if chapters:
+            item["chapters"] = chapters
         if item.get("parent_id"):
             parent = db.get_video(str(item["parent_id"])) or {}
             item["parent_title"] = parent.get("title", "")

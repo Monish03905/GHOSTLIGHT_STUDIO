@@ -69,6 +69,10 @@ const fmtDur = (s) => {
   const sec = Math.round(s % 60);
   return m ? `${m}m ${sec}s` : `${sec}s`;
 };
+const fmtClock = (s) => {
+  const v = Math.max(0, Math.round(Number(s) || 0));
+  return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`;
+};
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -274,6 +278,72 @@ function renderGrid() {
 
 /* ---------- drawer ---------- */
 
+function chaptersBlock(v) {
+  const chapters = Array.isArray(v.chapters) ? v.chapters : [];
+  if (chapters.length < 2) return '';
+  const total = chapters.reduce((sum, c) => sum + Math.max(0.1, c.end - c.start), 0);
+  const segments = chapters.map((c, i) => {
+    const share = Math.max(0.04, (c.end - c.start) / total);
+    return `<button type="button" class="chapter-seg" data-chapter="${i}"
+      data-chapter-start="${c.start}" data-chapter-end="${c.end}"
+      style="flex:${share.toFixed(4)} 1 0" title="${esc(c.label)} — ${fmtClock(c.start)}">
+      <i></i><span>${fmtClock(c.start)}</span>
+    </button>`;
+  }).join('');
+  return `
+    <div class="chapters" id="chapters">
+      <div class="chapter-head">
+        <span class="kicker">The reel</span>
+        <span class="chapter-hint">${chapters.length} chapters · click to jump</span>
+      </div>
+      <div class="chapter-track">${segments}</div>
+      <div class="chapter-now"><time>0:00</time><span>${esc(chapters[0].label)}</span></div>
+    </div>`;
+}
+
+function bindChapters(drawer, v) {
+  const segments = Array.from(drawer.querySelectorAll('[data-chapter-start]'));
+  if (!segments.length) return;
+  const video = drawer.querySelector('video');
+  const now = drawer.querySelector('.chapter-now');
+  const chapters = v.chapters || [];
+  const seek = (el) => {
+    const start = Number(el.dataset.chapterStart) || 0;
+    if (video) {
+      try {
+        video.currentTime = start;
+        video.play().catch(() => {});
+        video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (_) {}
+    }
+  };
+  const paint = () => {
+    const t = video ? video.currentTime : 0;
+    let current = 0;
+    segments.forEach((el) => {
+      const start = Number(el.dataset.chapterStart) || 0;
+      const end = Number(el.dataset.chapterEnd) || start;
+      if (t >= start) current = Number(el.dataset.chapter);
+      const fill = t >= end ? 1 : t <= start ? 0 : (t - start) / Math.max(0.001, end - start);
+      const bar = el.querySelector('i');
+      if (bar) bar.style.width = `${Math.round(fill * 100)}%`;
+    });
+    segments.forEach((el) => el.classList.toggle('is-current', Number(el.dataset.chapter) === current));
+    if (now) {
+      const label = now.querySelector('span');
+      const time = now.querySelector('time');
+      if (label) label.textContent = chapters[current] ? chapters[current].label : '';
+      if (time) time.textContent = fmtClock(t);
+    }
+  };
+  segments.forEach((el) => el.addEventListener('click', () => seek(el)));
+  if (video) {
+    video.addEventListener('timeupdate', paint);
+    video.addEventListener('seeked', paint);
+  }
+  paint();
+}
+
 async function openDrawer(id) {
   let v;
   try { v = await api(`/api/videos/${id}`); } catch (exc) { return; }
@@ -342,6 +412,7 @@ async function openDrawer(id) {
       ${metrics.subs_gained ? `<span>+${fmtNum(metrics.subs_gained)} subs</span>` : ''}
     </div>
     ${v.video_path ? `<video controls preload="metadata" src="/api/videos/${v.id}/file/video"></video>` : ''}
+    ${v.video_path ? chaptersBlock(v) : ''}
     <div class="thumb-row">
       ${v.thumb_path ? `<img src="/api/videos/${v.id}/file/thumb" alt="thumbnail" />` : ''}
       ${v.poster_path && !v.video_path ? `<img src="/api/videos/${v.id}/file/poster" alt="poster" />` : ''}
@@ -400,6 +471,8 @@ async function openDrawer(id) {
       localizeFilm(v.id, el.dataset.lang);
     });
   });
+
+  bindChapters(drawer, v);
 }
 
 function fmtBytes(n) {
@@ -1794,6 +1867,326 @@ async function refresh() {
   }
 }
 
+/* ---------- Aurora Theatre: light, sky, clock, palette ---------- */
+
+const THEME_KEY = 'ghostlight.theme';
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
+const SKY = { canvas: null, ctx: null, stars: [], dpr: 1, px: 0, py: 0, last: 0 };
+
+const currentTheme = () => (document.documentElement.dataset.theme === 'daylight' ? 'daylight' : 'night');
+
+function paintSky() {
+  const { ctx, canvas } = SKY;
+  if (!ctx || !canvas) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  ctx.setTransform(SKY.dpr, 0, 0, SKY.dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const day = currentTheme() === 'daylight';
+  for (const star of SKY.stars) {
+    const alpha = star.a * (0.55 + 0.45 * Math.sin(star.tw));
+    const x = ((((star.x + SKY.px * 0.018) % 1) + 1) % 1) * w;
+    const y = ((((star.y + SKY.py * 0.018) % 1) + 1) % 1) * h;
+    ctx.beginPath();
+    ctx.arc(x, y, star.r, 0, Math.PI * 2);
+    ctx.fillStyle = day ? `rgba(46, 74, 108, ${alpha * 0.38})` : `rgba(216, 238, 255, ${alpha})`;
+    ctx.fill();
+  }
+}
+
+function resizeSky() {
+  const canvas = SKY.canvas;
+  if (!canvas) return;
+  SKY.dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(window.innerWidth * SKY.dpr);
+  canvas.height = Math.round(window.innerHeight * SKY.dpr);
+  canvas.style.width = `${window.innerWidth}px`;
+  canvas.style.height = `${window.innerHeight}px`;
+  paintSky();
+}
+
+function frameSky(ts) {
+  if (REDUCED.matches) return;
+  if (!SKY.last || ts - SKY.last > 32) {
+    for (const star of SKY.stars) {
+      star.x += star.v;
+      if (star.x > 1) star.x -= 1;
+      star.tw += star.twv;
+    }
+    paintSky();
+    SKY.last = ts;
+  }
+  requestAnimationFrame(frameSky);
+}
+
+function seedSky() {
+  const canvas = $('#sky');
+  if (!canvas) return;
+  SKY.canvas = canvas;
+  SKY.ctx = canvas.getContext('2d');
+  const count = Math.max(60, Math.min(170, Math.round((window.innerWidth * window.innerHeight) / 15000)));
+  SKY.stars = Array.from({ length: count }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    r: 0.5 + Math.random() * 1.5,
+    a: 0.18 + Math.random() * 0.62,
+    v: 0.000015 + Math.random() * 0.00005,
+    tw: Math.random() * Math.PI * 2,
+    twv: 0.004 + Math.random() * 0.012,
+  }));
+  resizeSky();
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resizeSky, 160);
+  });
+  window.addEventListener('pointermove', (ev) => {
+    SKY.px = ev.clientX / window.innerWidth - 0.5;
+    SKY.py = ev.clientY / window.innerHeight - 0.5;
+  }, { passive: true });
+  if (REDUCED.matches) paintSky();
+  else requestAnimationFrame(frameSky);
+}
+
+function applyTheme(theme, persist) {
+  if (theme === 'daylight') document.documentElement.dataset.theme = 'daylight';
+  else delete document.documentElement.dataset.theme;
+  const btn = $('#theme-toggle');
+  if (btn) {
+    btn.setAttribute('aria-label', theme === 'daylight' ? 'Switch to night' : 'Switch to daylight');
+    btn.title = theme === 'daylight' ? 'Ghost light, please (T)' : 'Switch the light (T)';
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === 'daylight' ? '#f4efe3' : '#070b16';
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+  }
+  paintSky();
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme() === 'daylight' ? 'night' : 'daylight', true);
+}
+
+function tickClock() {
+  const el = $('#studio-clock');
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  el.title = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+function seekFilm(start) {
+  const video = $('#drawer video');
+  if (!video) return;
+  try {
+    video.currentTime = Math.max(0, Number(start) || 0);
+    video.play().catch(() => {});
+    video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (_) {}
+}
+
+const PALETTE = { open: false, items: [], nodes: [], active: 0 };
+
+function paletteItems() {
+  const views = [
+    ['The Desk', 'desk', 'the command line and the live log', '◈'],
+    ['The Network', 'network', 'voices, autopilot and the studio journal', '◎'],
+    ['The Radar', 'radar', 'trends, ideas and the AI brain', '◉'],
+    ['The Shelf', 'library', 'every film the studio has made', '▤'],
+    ['The knobs', 'settings', 'youtube, schedule and the archive', '⚙'],
+  ];
+  const items = views.map(([title, view, hint, glyph]) => ({
+    group: 'Go to', glyph, title, hint, kind: 'view', run: () => switchView(view),
+  }));
+
+  items.push(
+    { group: 'Do', glyph: '✳', title: 'Make a short', hint: 'write, voice, score and cut a new short', kind: 'action', run: () => runCommand('make a short') },
+    { group: 'Do', glyph: '✳', title: 'Make a long film', hint: 'a longer piece with chapters', kind: 'action', run: () => runCommand('make a long film') },
+    { group: 'Do', glyph: '▲', title: 'Upload the latest film', hint: 'send the newest ready film to its channel', kind: 'action', run: () => runCommand('upload the latest film') },
+    { group: 'Do', glyph: '❚❚', title: 'Pause the schedule', hint: 'hold every airtime, keep the bench', kind: 'action', run: () => runCommand('pause the schedule') },
+    { group: 'Do', glyph: '▶', title: 'Resume the schedule', hint: 'let the airtimes run again', kind: 'action', run: () => runCommand('resume') },
+    { group: 'Do', glyph: '◉', title: 'Refresh the radar', hint: 'pull the trend board again', kind: 'action', run: () => { switchView('radar'); loadRadar().catch(() => {}); } },
+    { group: 'Do', glyph: '✦', title: 'Draw four ideas', hint: 'ask the studio for fresh pitches', kind: 'action', run: () => { switchView('radar'); drawIdeas(RADAR.trend); } },
+    { group: 'Do', glyph: '⌂', title: 'Open the archive', hint: 'storage, backup and guarded prune', kind: 'action', run: () => {
+      switchView('settings');
+      setTimeout(() => $('#panel-library')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    } },
+    { group: 'Do', glyph: '✉', title: 'Mark the bell read', hint: 'clear every notification', kind: 'action', run: async () => {
+      try {
+        await api('/api/notifications/read', { method: 'POST', body: { id: 0 } });
+        loadNotifications();
+      } catch (_) {}
+    } },
+    { group: 'Light', glyph: '◐', title: currentTheme() === 'daylight' ? 'Switch to night' : 'Switch to daylight', hint: 'the room changes, the films do not', kind: 'theme', run: toggleTheme },
+  );
+
+  if (state.currentFilm && $('#drawer') && !$('#drawer').hidden) {
+    items.push({ group: 'This film', glyph: '✕', title: 'Close this film', hint: 'shut the drawer', kind: 'action', run: closeDrawer });
+    const chapters = Array.isArray(state.currentFilm.chapters) ? state.currentFilm.chapters : [];
+    chapters.forEach((c) => items.push({
+      group: 'This film',
+      glyph: '▸',
+      title: c.label,
+      hint: `jump to ${fmtClock(c.start)}`,
+      kind: 'chapter',
+      run: () => seekFilm(c.start),
+    }));
+  }
+
+  state.videos.slice(0, 40).forEach((v) => items.push({
+    group: 'Films',
+    glyph: '▸',
+    title: v.title || 'Untitled commission',
+    hint: `${v.format === 'long' ? 'long form' : 'short'} · ${v.status}${v.duration ? ' · ' + fmtDur(v.duration) : ''}`,
+    kind: 'film',
+    run: () => openDrawer(v.id),
+  }));
+
+  return items;
+}
+
+function setPaletteActive(index, scroll) {
+  if (!PALETTE.nodes.length) return;
+  PALETTE.active = Math.max(0, Math.min(index, PALETTE.nodes.length - 1));
+  PALETTE.nodes.forEach((node, i) => node.classList.toggle('is-active', i === PALETTE.active));
+  if (scroll) PALETTE.nodes[PALETTE.active].scrollIntoView({ block: 'nearest' });
+}
+
+function renderPalette() {
+  const list = $('#palette-list');
+  if (!list) return;
+  const query = $('#palette-input').value.trim().toLowerCase();
+  const items = paletteItems().filter((item) => !query
+    || `${item.title} ${item.hint} ${item.kind} ${item.group}`.toLowerCase().includes(query));
+  PALETTE.items = items;
+  PALETTE.nodes = [];
+  list.innerHTML = '';
+  let group = '';
+  items.forEach((item, index) => {
+    if (item.group !== group) {
+      group = item.group;
+      const head = document.createElement('div');
+      head.className = 'palette-group';
+      head.textContent = group;
+      list.appendChild(head);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'palette-item';
+    btn.dataset.index = String(index);
+    btn.innerHTML = `<span class="pi-glyph">${esc(item.glyph || '·')}</span>
+      <span class="pi-body"><strong>${esc(item.title)}</strong>${item.hint ? `<em>${esc(item.hint)}</em>` : ''}</span>
+      <span class="pi-kind">${esc(item.kind)}</span>`;
+    btn.addEventListener('mousemove', () => { if (PALETTE.active !== index) setPaletteActive(index); });
+    btn.addEventListener('click', () => paletteRun(index));
+    list.appendChild(btn);
+    PALETTE.nodes.push(btn);
+  });
+  if (!items.length) {
+    list.innerHTML = '<div class="palette-empty">Nothing in the studio matches that. Try “network”, “make”, or a film title.</div>';
+  }
+  PALETTE.active = Math.min(PALETTE.active, Math.max(0, items.length - 1));
+  setPaletteActive(PALETTE.active, true);
+  $('#palette-mode').textContent = query ? 'search' : 'command';
+}
+
+function paletteRun(index) {
+  const item = PALETTE.items[index];
+  if (!item) return;
+  closePalette();
+  try {
+    const out = item.run();
+    if (out && typeof out.catch === 'function') out.catch(() => {});
+  } catch (_) {}
+}
+
+function openPalette() {
+  const box = $('#palette');
+  const veil = $('#palette-veil');
+  if (!box || !veil) return;
+  PALETTE.open = true;
+  box.hidden = false;
+  veil.hidden = false;
+  document.documentElement.classList.add('has-palette');
+  $('#palette-input').value = '';
+  PALETTE.active = 0;
+  renderPalette();
+  $('#palette-open')?.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => $('#palette-input').focus());
+}
+
+function closePalette() {
+  const box = $('#palette');
+  const veil = $('#palette-veil');
+  if (!box || !PALETTE.open) return;
+  PALETTE.open = false;
+  box.hidden = true;
+  veil.hidden = true;
+  document.documentElement.classList.remove('has-palette');
+  $('#palette-open')?.setAttribute('aria-expanded', 'false');
+  $('#palette-input')?.blur();
+}
+
+$('#theme-toggle')?.addEventListener('click', toggleTheme);
+$('#palette-open')?.addEventListener('click', openPalette);
+$('#palette-veil')?.addEventListener('click', closePalette);
+$('#palette-input')?.addEventListener('input', () => { PALETTE.active = 0; renderPalette(); });
+$('#palette-input')?.addEventListener('keydown', (ev) => {
+  if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    setPaletteActive(PALETTE.active + 1, true);
+  } else if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    setPaletteActive(PALETTE.active - 1, true);
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault();
+    paletteRun(PALETTE.active);
+  } else if (ev.key === 'Escape') {
+    ev.stopPropagation();
+    closePalette();
+  }
+});
+
+document.addEventListener('keydown', (ev) => {
+  const mod = ev.metaKey || ev.ctrlKey;
+  if (mod && ev.key.toLowerCase() === 'k') {
+    ev.preventDefault();
+    if (PALETTE.open) closePalette();
+    else openPalette();
+    return;
+  }
+  if (ev.key === 'Escape') {
+    if (PALETTE.open) { closePalette(); return; }
+    closeDrawer();
+    if (!$('#channel-modal').hidden) closeChannelModal();
+    return;
+  }
+  if (PALETTE.open) return;
+  const tag = (ev.target.tagName || '').toLowerCase();
+  const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || ev.target.isContentEditable;
+  if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (['1', '2', '3', '4', '5'].includes(ev.key)) {
+    switchView(['desk', 'network', 'radar', 'library', 'settings'][Number(ev.key) - 1]);
+    return;
+  }
+  if (ev.key.toLowerCase() === 't') { toggleTheme(); return; }
+  if (ev.key.toLowerCase() === 'b') { toggleBell(); return; }
+  if (ev.key === '/') {
+    ev.preventDefault();
+    switchView('desk');
+    $('#command-input')?.focus();
+  }
+});
+
+applyTheme(currentTheme(), false);
+tickClock();
+setInterval(tickClock, 1000);
+seedSky();
+window.addEventListener('storage', (ev) => {
+  if (ev.key === THEME_KEY && ev.newValue) applyTheme(ev.newValue, false);
+});
+
 /* ---------- wire up ---------- */
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -1965,11 +2358,6 @@ $('#brain-think') && $('#brain-think').addEventListener('click', async () => {
 });
 
 $('#drawer-veil').addEventListener('click', closeDrawer);
-document.addEventListener('keydown', (ev) => {
-  if (ev.key !== 'Escape') return;
-  closeDrawer();
-  if (!$('#channel-modal').hidden) closeChannelModal();
-});
 
 /* land on the right view after a Google redirect */
 const bootParams = new URLSearchParams(location.search);

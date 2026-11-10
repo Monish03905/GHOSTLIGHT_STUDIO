@@ -4,18 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ghostlight Studio — one strange idea at a time</title>
-  <meta name="theme-color" content="#171512" />
+  <meta name="theme-color" content="#070b16" />
+  <script>
+    try { const saved = localStorage.getItem('ghostlight.theme'); if (saved) document.documentElement.dataset.theme = saved; } catch (_) {}
+  </script>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23171512'/%3E%3Cpath d='M16 5c1.2 3.4 4.6 6 4.6 10a4.6 4.6 0 1 1-9.2 0C11.4 11 14.8 8.4 16 5z' fill='%23d9a441'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070b16'/%3E%3Ccircle cx='16' cy='15' r='6' fill='%23ffd479'/%3E%3Cpath d='M13 21h6l1.5 6h-9z' fill='%235ef2d6' opacity='.7'/%3E%3C/svg%3E" />
 </head>
 <body>
+  <div class="ambient" aria-hidden="true">
+    <canvas id="sky"></canvas>
+    <div class="aurora a-one"></div>
+    <div class="aurora a-two"></div>
+    <div class="aurora a-three"></div>
+    <div class="grain"></div>
+  </div>
   <header class="masthead">
     <div class="masthead-inner">
       <div class="brand">
-        <div class="wordmark">GHOSTLIGHT<span class="amp">✳</span>STUDIO</div>
-        <div class="tagline">one strange idea at a time</div>
+        <span class="brand-orb" aria-hidden="true"><i></i></span>
+        <div class="brand-copy">
+          <div class="wordmark">GHOSTLIGHT<span class="amp">✳</span>STUDIO</div>
+          <div class="tagline">one strange idea at a time</div>
+        </div>
       </div>
       <nav class="tabs" role="tablist">
         <button class="tab is-active" data-view="desk">The Desk</button>
@@ -24,16 +37,27 @@
         <button class="tab" data-view="library">The Shelf</button>
         <button class="tab" data-view="settings">The knobs</button>
       </nav>
-      <div class="chips" id="chips">
-        <span class="chip" id="chip-studio" title="Studio bench">…</span>
-        <span class="chip" id="chip-feeds" title="Channels on the network">…</span>
-        <span class="chip" id="chip-schedule" title="Publishing schedule">…</span>
-        <span class="chip" id="chip-youtube" title="YouTube channels">…</span>
-        <span class="chip" id="chip-quota" title="Today's quota">…</span>
-        <button class="bell" id="bell" type="button" aria-label="Studio notifications" aria-expanded="false">
-          <span class="bell-mark">✳</span>
-          <span class="bell-count" id="bell-count" hidden>0</span>
-        </button>
+      <div class="masthead-right">
+        <div class="tools">
+          <button class="tool palette-open" id="palette-open" type="button" aria-label="Open the command palette" aria-expanded="false" title="Command palette (Ctrl K)">
+            <span class="tool-glyph">⌘</span><span class="tool-word">Command</span><kbd>K</kbd>
+          </button>
+          <span class="clock" id="studio-clock" title="Studio time">--:--</span>
+          <button class="tool icon" id="theme-toggle" type="button" aria-label="Switch to daylight" title="Switch the light (T)">
+            <span class="theme-glyph">◐</span>
+          </button>
+          <button class="bell" id="bell" type="button" aria-label="Studio notifications" aria-expanded="false">
+            <span class="bell-mark">✳</span>
+            <span class="bell-count" id="bell-count" hidden>0</span>
+          </button>
+        </div>
+        <div class="chips" id="chips">
+          <span class="chip" id="chip-studio" title="Studio bench">…</span>
+          <span class="chip" id="chip-feeds" title="Channels on the network">…</span>
+          <span class="chip" id="chip-schedule" title="Publishing schedule">…</span>
+          <span class="chip" id="chip-youtube" title="YouTube channels">…</span>
+          <span class="chip" id="chip-quota" title="Today's quota">…</span>
+        </div>
       </div>
     </div>
     <div class="bell-panel" id="bell-panel" hidden>
@@ -270,8 +294,27 @@
   <div class="modal" id="channel-modal" hidden></div>
   <input type="file" id="secret-file" accept=".json,application/json" hidden />
 
+  <!-- ============ COMMAND PALETTE ============ -->
+  <div class="palette-veil" id="palette-veil" hidden></div>
+  <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+    <div class="palette-head">
+      <span class="palette-glyph">✳</span>
+      <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search the studio — films, views, actions…" aria-label="Search commands" />
+      <span class="palette-mode" id="palette-mode">command</span>
+    </div>
+    <div class="palette-list" id="palette-list" role="listbox"></div>
+    <div class="palette-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> run</span>
+      <span><kbd>esc</kbd> close</span>
+      <span class="palette-keys">1–5 views · T theme · B bell</span>
+    </div>
+  </div>
+
   <footer class="colophon">
     <span>Ghostlight Studio — every film written, scored, painted and uploaded by the machine. No faces. No repeats.</span>
+    <span class="key-hints"><kbd>⌘</kbd><kbd>K</kbd> palette · <kbd>1</kbd>–<kbd>5</kbd> views · <kbd>T</kbd> light · <kbd>B</kbd> bell</span>
   </footer>
 
   <script src="app.js"></script>
