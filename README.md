@@ -505,7 +505,7 @@ web/               dashboard + PWA shell (no build step)
   index.html  app.js  styles.css  sw.js  manifest.webmanifest  icons/
 scripts/           make_icons.py for the PWA assets
 docs/              GOOGLE_SETUP.md · MONETIZATION.md · PLATFORM.md · assets/
-tests/             97 tests across the engine, the gate, the API, repurposing, localization,
+tests/             98 tests across the engine, the gate, the API, repurposing, localization,
                    editorial reads, notifications and the library
 .github/           CI: pytest on Python 3.12 with ffmpeg
 ```
