@@ -166,6 +166,22 @@ flowchart TD
 
 The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it, and every panel is driven by live studio state. It is dressed as **Aurora Theatre**: a deep navy stage lit by slow aurora drifts, drifting stars, glass panels and a warm ghost light, with serif display headings over a sans reading face. A daylight theme is one keypress away.
 
+<p align="center">
+  <img src="docs/assets/desk-night.webp" alt="The Desk at night: a navy stage with aurora light, the command line, studio stats and the live log" width="49%">
+  <img src="docs/assets/shelf.webp" alt="The Shelf: painted film posters in a dark glass grid" width="49%">
+  <br>
+  <img src="docs/assets/palette.webp" alt="The command palette searching views, actions and films" width="49%">
+  <img src="docs/assets/drawer.webp" alt="The film drawer with the chapter rail under the player" width="49%">
+  <br>
+  <sub>The stage at night · the shelf · ⌘K command palette · the film drawer and its chapter rail — the real studio at 1440×1000.</sub>
+</p>
+
+<details>
+<summary><b>The same stage in daylight</b></summary>
+<p align="center"><img src="docs/assets/desk-daylight.webp" alt="The desk in daylight: warm paper surfaces, ink type and the same live state" width="100%"></p>
+</details>
+
+
 | Tab | What lives there |
 |---|---|
 | **The Desk** | Queue, films in flight, the desk log (server-sent events), and one-click commissions |
