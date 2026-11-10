@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ghostlight Studio — one strange idea at a time</title>
+  <meta name="theme-color" content="#171512" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23171512'/%3E%3Cpath d='M16 5c1.2 3.4 4.6 6 4.6 10a4.6 4.6 0 1 1-9.2 0C11.4 11 14.8 8.4 16 5z' fill='%23d9a441'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="brand">
+        <div class="wordmark">GHOSTLIGHT<span class="amp">✳</span>STUDIO</div>
+        <div class="tagline">one strange idea at a time</div>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab is-active" data-view="desk">The Desk</button>
+        <button class="tab" data-view="network">The Network</button>
+        <button class="tab" data-view="radar">The Radar</button>
+        <button class="tab" data-view="library">The Shelf</button>
+        <button class="tab" data-view="settings">The knobs</button>
+      </nav>
+      <div class="chips" id="chips">
+        <span class="chip" id="chip-studio" title="Studio bench">…</span>
+        <span class="chip" id="chip-feeds" title="Channels on the network">…</span>
+        <span class="chip" id="chip-schedule" title="Publishing schedule">…</span>
+        <span class="chip" id="chip-youtube" title="YouTube channels">…</span>
+        <span class="chip" id="chip-quota" title="Today's quota">…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ THE DESK ============ -->
+  <main class="view is-active" id="view-desk">
+    <section class="desk">
+      <div class="desk-left">
+        <div class="command-wrap">
+          <label class="kicker" for="command-input">Tell the studio anything</label>
+          <form id="command-form" class="command-form">
+            <input id="command-input" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="make a short about deep-sea light — or just say status" />
+            <button type="submit" class="command-send">Run it</button>
+          </form>
+          <div class="command-hints">
+            <button class="hint" data-cmd="status">status</button>
+            <button class="hint" data-cmd="make a short">make a short</button>
+            <button class="hint" data-cmd="make a long film">make a long film</button>
+            <button class="hint" data-cmd="upload the latest film">upload the latest</button>
+            <button class="hint" data-cmd="pause the schedule">pause</button>
+            <button class="hint" data-cmd="resume">resume</button>
+          </div>
+          <div id="command-reply" class="command-reply" hidden></div>
+        </div>
+
+        <div class="now-making" id="now-making" hidden>
+          <div class="kicker">On the bench right now</div>
+          <div class="making-title" id="making-title"></div>
+          <div class="making-stage" id="making-stage"></div>
+          <div class="progress-rail"><div class="progress-fill" id="making-progress"></div></div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+      </div>
+
+      <div class="desk-right">
+        <div class="log-head">
+          <span class="kicker">Desk log</span>
+          <span class="log-live" id="log-live"><span class="pulse"></span> live</span>
+        </div>
+        <ol class="log" id="log"></ol>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ THE NETWORK ============ -->
+  <main class="view" id="view-network">
+    <section class="network">
+      <div class="network-hero">
+        <div class="network-intro">
+          <span class="kicker">The network</span>
+          <h1 class="network-title">Several voices,<br /><em>one strange machine.</em></h1>
+          <p class="network-lede" id="network-lede">Waking the network…</p>
+          <div class="network-flash" id="network-flash" hidden></div>
+        </div>
+        <div class="network-totals" id="network-totals"></div>
+      </div>
+
+      <div class="autopilot-strip" id="autopilot-strip"></div>
+
+      <div class="channel-grid" id="channel-grid"></div>
+
+      <div class="network-lower">
+        <section class="panel journal-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">The studio's journal</h2>
+              <p class="panel-note">What the machine decided, and why.</p>
+            </div>
+            <button class="btn small" id="journal-refresh">Think &amp; learn</button>
+          </div>
+          <ol class="journal" id="journal"></ol>
+        </section>
+
+        <section class="panel plan-panel">
+          <h2 class="panel-title">How the network grows itself</h2>
+          <ol class="plan-list">
+            <li><span class="plan-num">I</span><div><strong>It publishes like a channel, not a dump.</strong>
+              Fixed airtimes per identity, a warm backlog film ready, and one upload at a time so the feed never looks automated.</div></li>
+            <li><span class="plan-num">II</span><div><strong>Every film ships with its own reach.</strong>
+              Captions, thumbnail, playlist, hashtags, a share kit and an optional Discord or RSS announcement go out with the upload.</div></li>
+            <li><span class="plan-num">III</span><div><strong>It reads the room.</strong>
+              Analytics become a playbook — which niches travel, which registers hold attention, which hour earns subscribers — and the next film is chosen from that.</div></li>
+            <li><span class="plan-num">IV</span><div><strong>It keeps exploring.</strong>
+              A deliberate slice of every decision is random, so the network never collapses into one repeated formula. Novelty is enforced before a film is ever written.</div></li>
+          </ol>
+          <p class="secret-note" id="network-honesty">Growth is earned film by film. The studio cannot buy viewers, and revenue depends on watch time, region and YouTube's programme rules — the ledger below is what actually happened, not a forecast.</p>
+        </section>
+      </div>
+
+      <section class="panel lineup-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">Add another voice</h2>
+            <p class="panel-note">Start from a house template, then bend it to the channel's own obsessions.</p>
+          </div>
+        </div>
+        <div class="template-row" id="template-row"></div>
+      </section>
+    </section>
+  </main>
+
+  <!-- ============ THE RADAR ============ -->
+  <main class="view" id="view-radar">
+    <section class="radar">
+      <div class="radar-hero">
+        <div class="radar-intro">
+          <span class="kicker">The radar</span>
+          <h1 class="radar-title">What the world is<br /><em>leaning toward.</em></h1>
+          <p class="radar-lede" id="radar-lede">Reading the room…</p>
+          <div class="network-flash" id="radar-flash" hidden></div>
+        </div>
+        <div class="radar-controls">
+          <div class="field"><label for="radar-channel">Voice</label>
+            <select id="radar-channel"></select></div>
+          <div class="field"><label for="radar-format">Format</label>
+            <select id="radar-format"><option value="short">Shorts</option><option value="long">Long form</option></select></div>
+          <div class="radar-buttons">
+            <button class="btn" id="radar-live">Pull live signals</button>
+            <button class="btn primary" id="radar-refresh">Refresh radar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="radar-meta" id="radar-meta"></div>
+      <div class="trend-grid" id="trend-grid"></div>
+
+      <section class="panel idea-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">The idea wall</h2>
+            <p class="panel-note">Original pitches — never copies. Approve one and the writer, the novelty ledger and the quality gate take it from there.</p>
+          </div>
+          <div class="idea-controls">
+            <span class="idea-seed" id="idea-seed"></span>
+            <button class="btn primary" id="idea-generate">Draw four ideas</button>
+          </div>
+        </div>
+        <div class="idea-grid" id="idea-grid"></div>
+      </section>
+
+      <div class="radar-lower" id="radar-lower">
+        <section class="panel calendar-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">The next seven days</h2>
+              <p class="panel-note">Airtimes, films in the works and what is already on the shelf.</p>
+            </div>
+          </div>
+          <div class="calendar" id="calendar"></div>
+        </section>
+
+        <section class="panel brain-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">The AI brain</h2>
+              <p class="panel-note">What the machine has learned, per voice.</p>
+            </div>
+            <button class="btn small" id="brain-think">Read analytics</button>
+          </div>
+          <div class="brain" id="brain"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ THE SHELF ============ -->
+  <main class="view" id="view-library">
+    <section class="shelf">
+      <div class="shelf-head">
+        <div class="filters" id="filters">
+          <button class="filter is-active" data-filter="all">Everything</button>
+          <button class="filter" data-filter="ready">Ready</button>
+          <button class="filter" data-filter="published">Published</button>
+          <button class="filter" data-filter="drafting">In the works</button>
+          <button class="filter" data-filter="failed">Abandoned</button>
+          <button class="filter" data-filter="archived">Archived</button>
+        </div>
+        <div class="shelf-count" id="shelf-count"></div>
+      </div>
+      <div class="grid" id="grid">
+        <div class="empty" id="grid-empty" hidden>
+          <div class="empty-mark">✳</div>
+          <p>The shelf is bare. Say the word — <em>“make a short”</em> — and I'll put something here.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ THE KNOBS ============ -->
+  <main class="view" id="view-settings">
+    <section class="knobs">
+      <div class="knob-col">
+        <div class="panel" id="panel-youtube">
+          <h2 class="panel-title">The channel</h2>
+          <div id="youtube-body"></div>
+        </div>
+        <div class="panel" id="panel-schedule">
+          <h2 class="panel-title">The schedule</h2>
+          <div id="schedule-body"></div>
+        </div>
+      </div>
+      <div class="knob-col">
+        <div class="panel">
+          <h2 class="panel-title">The knobs</h2>
+          <p class="panel-note">Everything saves the moment you press the button. The studio takes it from there.</p>
+          <div id="settings-body"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FILM DRAWER ============ -->
+  <div class="drawer-veil" id="drawer-veil" hidden></div>
+  <aside class="drawer" id="drawer" hidden></aside>
+
+  <!-- ============ CHANNEL EDITOR ============ -->
+  <div class="modal-veil" id="channel-veil" hidden></div>
+  <div class="modal" id="channel-modal" hidden></div>
+  <input type="file" id="secret-file" accept=".json,application/json" hidden />
+
+  <footer class="colophon">
+    <span>Ghostlight Studio — every film written, scored, painted and uploaded by the machine. No faces. No repeats.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

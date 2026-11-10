@@ -1,0 +1,12 @@
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+httpx>=0.27
+PyYAML>=6.0.1
+numpy>=2.0
+Pillow>=10.4
+edge-tts>=6.1.12
+piper-tts>=1.2
+google-api-python-client>=2.140
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2

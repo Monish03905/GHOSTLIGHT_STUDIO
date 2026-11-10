@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+
+# studio state, rendered films and OAuth tokens
+data/
+secrets/
+config.local.yaml
+
+# OS noise
+.DS_Store
+Thumbs.db

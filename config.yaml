@@ -1,0 +1,125 @@
+studio:
+  name: Ghostlight Studio
+  tagline: one strange idea at a time
+  host: 127.0.0.1
+  port: 8787
+creator:
+  niches:
+  - cosmic
+  - deep_sea
+  - forgotten_history
+  - human_mind
+  - quiet_tech
+  - natural_world
+  - liminal_places
+  - everyday_physics
+  tone: cinematic, intimate, curious — never hype, never a listicle
+  audience: curious night owls who want one strange, beautiful idea before bed
+  language: en
+  cta: If this stayed with you, subscribe — one strange idea at a time.
+  avoid_topics: []
+novelty:
+  max_similarity: 0.3
+  attempts: 4
+  recent_for_prompt: 40
+script:
+  provider: auto
+  model: ''
+  temperature: 1.0
+  short_seconds:
+  - 28
+  - 46
+  long_seconds:
+  - 200
+  - 380
+  words_per_minute: 152
+  max_title_chars: 88
+voice:
+  provider: piper
+  edge_voice: en-US-AndrewNeural
+  edge_rate: +3%
+  edge_pitch: -3Hz
+  openai_model: gpt-4o-mini-tts
+  openai_voice: onyx
+  elevenlabs_voice_id: ''
+  elevenlabs_model: eleven_multilingual_v2
+  piper_binary: piper
+  piper_model: ''
+  piper_length_scale: 1.02
+  piper_noise: 0.667
+  piper_noise_w: 0.8
+  piper_volume: 1.0
+  system_voice: ''
+  system_rate: 0
+  segment_gap: 0.35
+  intro_pad: 1.5
+  outro_pad: 1.4
+visuals:
+  style: auto
+  grain: true
+  vignette: true
+  art_scale: 1.25
+music:
+  enabled: true
+  gain: 0.12
+  tempo: 70
+render:
+  fps: 30
+  crf: 20
+  preset: medium
+  short:
+  - 1080
+  - 1920
+  long:
+  - 1920
+  - 1080
+  keep_work_files: false
+youtube:
+  enabled: false
+  client_secret: secrets/client_secret.json
+  token: secrets/token.json
+  privacy: private
+  category_id: '27'
+  made_for_kids: false
+  disclose_ai: true
+  auto_upload: true
+  dry_run: false
+  daily_upload_limit: 5
+  quota_daily_limit: 10000
+  upload_cost: 1600
+  shorts_playlist: Shorts
+  long_playlist: Long Form
+  create_playlists: true
+  tags_suffix:
+  - ghostlight studio
+schedule:
+  enabled: false
+  paused: true
+  mode: rhythm
+  timezone: auto
+  times:
+  - 09:30
+  - '19:30'
+  formats:
+  - short
+  - long
+  - short
+  max_per_day: 2
+  min_gap_minutes: 240
+  catch_up_minutes: 45
+  max_failures_before_pause: 3
+autopilot:
+  enabled: true
+  target_channels: 3
+  backlog: 1
+  backlog_hours: 6
+  learn_minutes: 180
+  adapt_schedule: false
+  explore: 0.18
+  max_films_per_day: 4
+distribution:
+  enabled: true
+  webhook_url: ''
+  rss: true
+storage:
+  data_dir: data

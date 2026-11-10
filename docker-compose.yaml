@@ -1,0 +1,14 @@
+services:
+  studio:
+    build: .
+    container_name: ghostlight-studio
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data:/studio/data          # database, rendered films, work files
+      - ./secrets:/studio/secrets    # client_secret.json + token.json
+      - ./config.local.yaml:/studio/config.local.yaml:ro
+    restart: unless-stopped
+    # For the first YouTube sign-in inside a container, use:
+    #   docker compose exec studio python -m ghostlight connect
+    # (the desktop flow needs a browser on the host)
