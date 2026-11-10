@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from . import (
-    __version__, content, editorial, ideas, languages, library, publish, quality,
-    repurpose, trends,
+    __version__, content, editorial, ideas, languages, library, observatory,
+    publish, quality, repurpose, trends,
 )
 from .channels import (
     CHANNEL_TEMPLATES,
@@ -150,6 +150,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "tagline": cfg.get("studio.tagline"),
             },
         }
+
+    @app.get("/api/observatory")
+    def observatory_snapshot() -> dict[str, Any]:
+        return observatory.snapshot(cfg, db, youtube)
 
     def _growth_summary() -> dict[str, Any]:
         totals = {"views": 0, "watch_minutes": 0.0, "subs_gained": 0, "revenue": 0.0, "published": 0}

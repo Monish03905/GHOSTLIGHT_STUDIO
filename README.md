@@ -25,6 +25,7 @@
     <a href="#quick-start"><b>Quick start</b></a> ·
     <a href="#how-a-film-is-made">Pipeline</a> ·
     <a href="#the-control-room">Control room</a> ·
+    <a href="#the-observatory">Observatory</a> ·
     <a href="#the-network">Network</a> ·
     <a href="#the-quality-gate">Quality gate</a> ·
     <a href="#autonomy">Autonomy</a> ·
@@ -42,7 +43,7 @@ You talk to it like a person: *"make a short about deep-sea light"*, *"upload th
 
 **It runs with zero API keys.** The built-in Muse writes, numpy synthesises the score, and the renderer paints. Add an LLM, a premium voice or a Google sign-in only when you want them.
 
-> **Latest additions — 10 November 2026.** The desk has been rebuilt as **Aurora Theatre** — a new night-and-daylight visual system with a drifting star stage, glass surfaces and warm ghost light — plus a ⌘K command palette, keyboard shortcuts, a live studio clock and a chapter rail that seeks by real narration timings. Under it all sit the previous additions: vertical cuts from finished films, eight-language localization with validated metadata, a deterministic editorial read, a durable notification bell, and an archive for export, backup and guarded prune. [docs/PLATFORM.md](docs/PLATFORM.md) maps each module and every honest boundary.
+> **Latest additions — 10 November 2026.** The desk is rebuilt as **Aurora Theatre** — a drifting star stage, glass surfaces and warm ghost light — with **four moods** (night, daylight, twilight, ember), a ⌘K command palette, keyboard shortcuts, a live studio clock and a chapter rail that seeks by real narration timings. Press <kbd>O</kbd> for **the observatory**: a provider bench, a measured cost ledger and a per-film stage trail, built on persisted events rather than estimates dressed as facts. Under it all sit the previous additions: vertical cuts from finished films, eight-language localization with validated metadata, a deterministic editorial read, a durable notification bell, and an archive for export, backup and guarded prune. [docs/PLATFORM.md](docs/PLATFORM.md) maps each module and every honest boundary.
 
 ---
 
@@ -164,16 +165,19 @@ flowchart TD
 
 ## The control room
 
-The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it, and every panel is driven by live studio state. It is dressed as **Aurora Theatre**: a deep navy stage lit by slow aurora drifts, drifting stars, glass panels and a warm ghost light, with serif display headings over a sans reading face. A daylight theme is one keypress away.
+The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it, and every panel is driven by live studio state. It is dressed as **Aurora Theatre**: a deep navy stage lit by slow aurora drifts, drifting stars, glass panels and a warm ghost light, with serif display headings over a sans reading face. Four moods ship: **night**, **daylight**, **twilight** and **ember** — each one repaints the stage, the aurora, the star tint and the browser chrome, and the masthead remembers your choice.
 
 <p align="center">
   <img src="docs/assets/desk-night.webp" alt="The Desk at night: a navy stage with aurora light, the command line, studio stats and the live log" width="49%">
-  <img src="docs/assets/shelf.webp" alt="The Shelf: painted film posters in a dark glass grid" width="49%">
+  <img src="docs/assets/desk-twilight.webp" alt="The Desk at twilight: a violet stage with amber light and the mood whisper" width="49%">
   <br>
-  <img src="docs/assets/palette.webp" alt="The command palette searching views, actions and films" width="49%">
+  <img src="docs/assets/shelf.webp" alt="The Shelf: painted film posters in a dark glass grid" width="49%">
   <img src="docs/assets/drawer.webp" alt="The film drawer with the chapter rail under the player" width="49%">
   <br>
-  <sub>The stage at night · the shelf · ⌘K command palette · the film drawer and its chapter rail — the real studio at 1440×1000.</sub>
+  <img src="docs/assets/palette-moods.webp" alt="The command palette filtered to twilight, showing the Mood group" width="49%">
+  <img src="docs/assets/desk-ember.webp" alt="The Desk in ember: a warm ember stage with the last-fire mood whisper" width="49%">
+  <br>
+  <sub>The stage at night and twilight · the shelf · the film drawer and its chapter rail · the palette with moods · ember — the real studio at 1440×1000.</sub>
 </p>
 
 <details>
@@ -190,7 +194,7 @@ The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it,
 | **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, chapters, gate, editorial read, clips, languages, share kit and publishing |
 | **The knobs** | Settings, YouTube key and schedule, plus **The archive**: storage, export, backup and a guarded prune |
 
-**The stage is interactive.** Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> for the command palette — it searches every view, action, film and chapter of the open film, and runs the same API calls a click would. Bare keys drive the desk: <kbd>1</kbd>–<kbd>5</kbd> jump between views, <kbd>T</kbd> swaps night and daylight, <kbd>B</kbd> opens the bell, <kbd>/</kbd> drops into the command bar, and <kbd>Esc</kbd> closes whatever is open, palette first. The masthead runs a live studio clock, and the chosen theme is remembered in `localStorage` across reloads and tabs.
+**The stage is interactive.** Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> for the command palette — it searches every view, action, film and chapter of the open film, plus the four moods, and runs the same API calls a click would. Bare keys drive the desk: <kbd>1</kbd>–<kbd>5</kbd> jump between views, <kbd>O</kbd> opens the observatory, <kbd>T</kbd> walks through night → daylight → twilight → ember, <kbd>B</kbd> opens the bell, <kbd>/</kbd> drops into the command bar, and <kbd>Esc</kbd> closes whatever is open, palette first. The masthead runs a live studio clock, and the chosen mood is remembered in `localStorage` across reloads and tabs.
 
 The film drawer adds a **chapter rail** built from the real word timings in `narration.json`: each chapter is a segment of the film, sized by its spoken length, and clicking one seeks the player there while the rail paints the current scene as it plays.
 
@@ -199,7 +203,31 @@ The bell in the masthead keeps durable notices — finished films, gate blocks, 
 <details>
 <summary><b>Installable, offline-aware shell</b></summary>
 
-`web/manifest.webmanifest` and `web/sw.js` make the desk installable as a PWA. The service worker caches only the app shell (`/`, CSS, JS, manifest, icons) and never the API. Shell files are fetched network-first, so a studio update appears on the next load, with the cached copy used only when offline. Registration is limited to `https` and `localhost`, and the icons are generated by `scripts/make_icons.py`. The cache is versioned (`ghostlight-v3`), so a redesign retires the old shell cleanly.
+`web/manifest.webmanifest` and `web/sw.js` make the desk installable as a PWA. The service worker caches only the app shell (`/`, CSS, JS, manifest, icons) and never the API. Shell files are fetched network-first, so a studio update appears on the next load, with the cached copy used only when offline. Registration is limited to `https` and `localhost`, and the icons are generated by `scripts/make_icons.py`. The cache is versioned (`ghostlight-v4`), so a redesign retires the old shell cleanly.
+</details>
+
+---
+
+## The observatory
+
+Press <kbd>O</kbd> — or the ◎ in the masthead — and the stage dims behind a glass overlay that answers three questions with measured state instead of vibes.
+
+<p align="center"><img src="docs/assets/observatory.webp" alt="The Observatory: the provider bench, the cost ledger and the pipeline with stage trails" width="100%"></p>
+
+**The bench.** Seven providers — writer, voice, score, art, render, radar and publishing — each card says what is actually wired up, where it runs (on this machine or over the network), and what it needs. The writer card reads live from the LLM provider status (Ollama, cloud key or the offline Muse); voice reads Piper/Edge/OpenAI status; render reads the real ffmpeg path. Publishing stays **offline** until a Google account is connected, and says exactly that — the observatory never dresses an unavailable provider as ready.
+
+**The ledger.** Counts come from the films themselves: words written, measured narration minutes, measured runtime, uploads and bytes on disk. Each line is priced by a zero-default rate card (`costs.writer_per_1k_words`, `voice_per_minute`, `render_per_minute`, `storage_per_gb_month`), editable in the overlay, and every figure is labelled an estimate — not a bill. Leave the card at zero and the studio reports `USD 0.00`, because a local studio really does run locally.
+
+**The pipeline.** Every film on the bench shows how far it got through **written → voiced → scored → cut → gated → published**, plus the persisted stage trail behind it (`EventBus.step` writes each step to the database, not just the live log). Failed films say why. Clicking a film closes the observatory and opens its drawer.
+
+The overlay debounces live SSE stage events, so while a film is being made the trail updates in place. It repaints with every mood, works full-screen on a phone, and refreshes on demand.
+
+<details>
+<summary><b>The observatory in daylight and on a phone</b></summary>
+<p align="center">
+  <img src="docs/assets/observatory-daylight.webp" alt="The observatory in daylight: warm paper surfaces and ink type" width="72%"><br>
+  <img src="docs/assets/observatory-mobile.webp" alt="The observatory on a 390px phone: full-screen sections stacked" width="34%">
+</p>
 </details>
 
 ---
@@ -403,6 +431,21 @@ Everything lives in `config.yaml`; `config.local.yaml` overlays it, and `.env` h
 </details>
 
 <details>
+<summary><b>Costs and observability</b></summary>
+
+| Path | Meaning | Default |
+|---|---|---|
+| `costs.currency` | Label used in the observatory ledger | `USD` |
+| `costs.writer_per_1k_words` | Writer rate per 1,000 words | `0.0` |
+| `costs.voice_per_minute` | Voice rate per voiced minute | `0.0` |
+| `costs.render_per_minute` | Render rate per finished minute | `0.0` |
+| `costs.storage_per_gb_month` | Storage rate per GB-month | `0.0` |
+| `storage.data_dir` | Where films, posters and the database live | `data` |
+
+Every rate starts at zero because the default pipeline runs locally. Set a rate only if you route work through a paid provider; the ledger always labels its total an **estimate**, never a bill.
+</details>
+
+<details>
 <summary><b>Environment keys</b></summary>
 
 Put these in `.env` (git-ignored); none are required:
@@ -423,14 +466,14 @@ A local Ollama server needs no key and no configuration; the largest installed m
 ## HTTP API
 
 <details>
-<summary><b>59 endpoints, grouped</b></summary>
+<summary><b>60 endpoints, grouped</b></summary>
 
 **Desk and state**
 
 | Method | Path |
 |---|---|
 | GET | `/api/health`, `/api/status`, `/api/settings` |
-| GET | `/api/events`, `/api/stream` (SSE), `/api/journal`, `/api/growth` |
+| GET | `/api/events`, `/api/stream` (SSE), `/api/journal`, `/api/growth`, `/api/observatory` |
 | GET | `/api/notifications` (`?unread=true`), `/api/library/storage`, `/api/library/prune` |
 | POST | `/api/command`, `/api/generate`, `/api/notifications/read` |
 | POST | `/api/library/export`, `/api/library/backup`, `/api/library/prune` |
@@ -524,12 +567,13 @@ ghostlight/
   quality.py       pre-upload inspection              render.py        ffmpeg composition + stills
   editorial.py     deterministic script read           languages.py     localization + local voices
   repurpose.py     vertical cuts from word timings     library.py       storage, export, backup, prune
+  observatory.py   provider bench, cost ledger, stage observability
 web/               dashboard + PWA shell (no build step)
   index.html  app.js  styles.css  sw.js  manifest.webmanifest  icons/
 scripts/           make_icons.py for the PWA assets
 docs/              GOOGLE_SETUP.md · MONETIZATION.md · PLATFORM.md · assets/
-tests/             99 tests across the engine, the gate, the API, repurposing, localization,
-                   editorial reads, notifications and the library
+tests/             102 tests across the engine, the gate, the API, repurposing, localization,
+                   editorial reads, notifications, the library and the observatory
 .github/           CI: pytest on Python 3.12 with ffmpeg
 ```
 </details>
@@ -543,7 +587,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate, thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation, the editorial read, durable notifications, and the library's export, backup and guarded prune. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
+The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate, thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation, the editorial read, durable notifications, the library's export, backup and guarded prune, and the observatory's provider bench, cost ledger and pipeline trail. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
 
 <div align="center">
 <br>

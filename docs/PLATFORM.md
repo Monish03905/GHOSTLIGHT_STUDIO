@@ -1,6 +1,6 @@
 # The platform, module by module
 
-This page maps the 15-module blueprint Ghostlight grew from — plus the five
+This page maps the 15-module blueprint Ghostlight grew from — plus the six
 later additions — onto what actually ships in this repository, and just as
 importantly onto what does **not**. Nothing here is a promise of revenue; see
 [MONETIZATION.md](MONETIZATION.md) for that conversation.
@@ -23,12 +23,13 @@ importantly onto what does **not**. Nothing here is a promise of revenue; see
 | **12. AI brain** | `showrunner.py`, `autopilot` settings | A per-channel playbook learns which niches, registers and hours travel, then re-weights tomorrow's choices while keeping an exploration slice. This is an adaptive bandit over real analytics — not a trained model, and it never invents numbers. |
 | **13. Multi-account** | `channels.py`, `secrets/channels/<id>/` | Any number of voices, each with its own token, client secret, quota, airtimes, visibility, approval mode and analytics. |
 | **14. Idea wall & calendar** | `ideas.py`, **The Radar** tab | Original pitch cards with an angle, question and director's guidance; one click turns a pitch into a commission. The calendar shows planned airtimes, ready films, films in production and what already published — and says "empty" when it is empty. |
-| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream, dressed as **Aurora Theatre** — a drifting star canvas, layered aurora washes, glass panels, a warm ghost light and a serif/sans type pairing, with a full daylight theme remembered in `localStorage`. A ⌘/Ctrl-K command palette searches every view, action, film and chapter, driving the same API calls a click would; bare keys move between views (`1`–`5`), swap theme (`T`), open the bell (`B`) and focus the command bar (`/`). A live studio clock sits in the masthead, and the film drawer carries a chapter rail built from real narration timings that seeks the player. Installable on desktop and mobile; shell assets are fetched network-first (cache `ghostlight-v3`) so an update lands on the next load, with the cache used only offline. All studio state stays network-only. |
+| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream, dressed as **Aurora Theatre** — a drifting star canvas, layered aurora washes, glass panels, a warm ghost light and a serif/sans type pairing. **Four moods** — night, daylight, twilight and ember — repaint the stage, aurora, star tint and browser theme-colour, and the choice is remembered in `localStorage`. A ⌘/Ctrl-K command palette searches every view, action, film, chapter and mood, driving the same API calls a click would; bare keys move between views (`1`–`5`), open the observatory (`O`), cycle moods (`T`), open the bell (`B`) and focus the command bar (`/`). A live studio clock sits in the masthead, and the film drawer carries a chapter rail built from real narration timings that seeks the player. Installable on desktop and mobile; shell assets are fetched network-first (cache `ghostlight-v4`) so an update lands on the next load, with the cache used only offline. All studio state stays network-only. |
 | **16. Vertical repurposing** | `ghostlight/repurpose.py`, `orchestrator.repurpose` | Cuts complete-thought clips from a finished film using the word timings in `narration.json`. Windows are 15–60 s, non-overlapping, deduplicated by digest and text overlap, and never split a spoken sentence. Each cut becomes its own vertical child record (`kind=clip`) with blurred-fill framing, fitted foreground and burned-in captions, so the normal gate, approval, share-kit and upload paths work unchanged. |
 | **17. Localization** | `ghostlight/languages.py`, the film drawer | The configured model translates title, hook, description, tags and every spoken segment into Hindi, Telugu, Tamil, Spanish, French, German or Portuguese. Segment counts are validated and unchanged source text is rejected rather than passed off as a translation. Captions keep the original timings; a localized voiceover is recorded only when `edge-tts` is reachable and is labelled with its real provider. |
 | **18. Editorial read** | `ghostlight/editorial.py`, the film drawer | A deterministic second read of the script: hook, pacing, clarity, payoff, invitation, repetition, structure and rights flags, with a 0–100 score, concrete notes and hook starting points. It calls no model and explicitly labels its retention band a structural guess, not a forecast. |
 | **19. Notification center** | `notifications` table, `EventBus.notify`, the masthead bell | Durable studio notices for completed films, gate blocks, review requests, publications, failed localizations, exports and prunes. Unread counts survive restarts and the bell opens the relevant film. This is separate from the transient live log. |
 | **20. Library & maintenance** | `ghostlight/library.py`, **The knobs → The archive** | Storage report (records, tracked and on-disk size, free space, largest files, orphan folders), a catalogue ZIP with JSON/CSV and optional media, a safe SQLite backup, and a guarded prune. Pruning is preview-first, requires an explicit confirm, and only ever touches archived or failed films inside the studio's own video directory. |
+| **21. Observatory** | `ghostlight/observatory.py`, `GET /api/observatory`, the ◎ overlay | Provider bench, cost ledger and pipeline observability in one overlay (`O`). The bench reports seven providers from live status — writer (LLM provider), voice, score, art, render, radar and publishing — with where each runs and what it needs; an unavailable provider is shown as offline with the reason (publishing waits on a real Google OAuth grant). The ledger counts words, voiced minutes, rendered minutes, uploads and on-disk bytes from the films themselves, then prices them with a zero-default rate card (`costs.*`, editable in the overlay, persisted through `PATCH /api/settings`). Everything is labelled an estimate, never a bill. The pipeline shows each recent film's progress through written → voiced → scored → cut → gated → published plus its persisted stage trail; `EventBus.step` stores stage events in SQLite so the trail survives restarts, and SSE stage events refresh the overlay live. |
 
 ## Honest boundaries
 
@@ -75,6 +76,12 @@ infrastructure or review processes that no local build can supply honestly.
 - **Analytics are read-only.** The studio reads YouTube Analytics to learn; it
   never buys views, boosts posts or automates engagement. Those are the
   fastest routes to a policy strike.
+- **The observatory is local and honest.** It reads this machine's own state —
+  no external APM, tracing service or telemetry upload. Cost figures are
+  measured usage multiplied by a rate card you set, and are always labelled
+  estimates; with the default zero rates the ledger reads `USD 0.00` because
+  the local pipeline genuinely costs nothing per film. A provider that is not
+  configured is shown offline, not inferred as working.
 - **No revenue guarantee.** The quality gate and radar improve the odds of a
   film being watchable and timely. They cannot promise subscribers or income.
 
@@ -91,6 +98,9 @@ infrastructure or review processes that no local build can supply honestly.
   never cached.
 - **Notifications are durable, the log is not.** The bell reads from SQLite
   and survives restarts; the desk log is the transient event stream.
+- **Stage trails are durable too.** The observatory's pipeline reads persisted
+  `events` rows written by `EventBus.step`, so a film's trail is still there
+  after a restart. The desk log remains the live tail beside it.
 
 ## Approval modes at a glance
 

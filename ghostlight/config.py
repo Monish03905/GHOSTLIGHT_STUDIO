@@ -130,6 +130,13 @@ DEFAULTS: dict[str, Any] = {
         "max_failures_before_pause": 3,
     },
     "storage": {"data_dir": "data"},
+    "costs": {
+        "currency": "USD",
+        "writer_per_1k_words": 0.0,
+        "voice_per_minute": 0.0,
+        "render_per_minute": 0.0,
+        "storage_per_gb_month": 0.0,
+    },
 }
 
 

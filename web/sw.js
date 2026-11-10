@@ -1,5 +1,5 @@
 /* Ghostlight shell cache. Live studio state always comes from the network. */
-const VERSION = 'ghostlight-v3';
+const VERSION = 'ghostlight-v4';
 const SHELL = [
   '/',
   '/index.html',

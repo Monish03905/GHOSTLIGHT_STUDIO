@@ -433,9 +433,10 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, parent_id, kind, language, title, status, stage, format, niche, "
-                "channel_id, duration, bytes, archived, created_at, updated_at, published_at, "
-                "video_path, poster_path, thumb_path, captions_path, narration_path, music_path, "
-                "youtube_url FROM videos ORDER BY created_at DESC LIMIT ?",
+                "channel_id, duration, words, novelty, bytes, archived, created_at, updated_at, "
+                "published_at, video_path, poster_path, thumb_path, captions_path, narration_path, "
+                "music_path, quality, youtube_id, youtube_url, error FROM videos "
+                "ORDER BY created_at DESC LIMIT ?",
                 (max(1, min(limit, 20000)),),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -887,6 +888,23 @@ class Database:
             events.append(item)
         if not since_id:
             events.reverse()
+        return events
+
+    def list_video_events(self, video_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        """The stage trail for one film, oldest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM events WHERE video_id = ? ORDER BY id ASC LIMIT ?",
+                (video_id, max(1, min(limit, 500))),
+            ).fetchall()
+        events = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["data"] = json.loads(item.pop("data") or "{}")
+            except json.JSONDecodeError:
+                item["data"] = {}
+            events.append(item)
         return events
 
     # -- directives -----------------------------------------------------

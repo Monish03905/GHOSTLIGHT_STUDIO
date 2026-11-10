@@ -42,6 +42,9 @@
           <button class="tool palette-open" id="palette-open" type="button" aria-label="Open the command palette" aria-expanded="false" title="Command palette (Ctrl K)">
             <span class="tool-glyph">⌘</span><span class="tool-word">Command</span><kbd>K</kbd>
           </button>
+          <button class="tool icon obs-open" id="obs-open" type="button" aria-label="Open the observatory" aria-expanded="false" title="The observatory (O)">
+            <span class="obs-glyph">◎</span>
+          </button>
           <span class="clock" id="studio-clock" title="Studio time">--:--</span>
           <button class="tool icon" id="theme-toggle" type="button" aria-label="Switch to daylight" title="Switch the light (T)">
             <span class="theme-glyph">◐</span>
@@ -285,6 +288,65 @@
     </section>
   </main>
 
+  <!-- ============ THE OBSERVATORY ============ -->
+  <div class="obs-veil" id="obs-veil" hidden></div>
+  <section class="observatory" id="observatory" role="dialog" aria-modal="true"
+           aria-labelledby="obs-title" hidden>
+    <header class="obs-head">
+      <div class="obs-intro">
+        <span class="kicker">The observatory</span>
+        <h1 class="obs-title" id="obs-title">Everything the machine <em>can see.</em></h1>
+        <p class="obs-lede">The providers on the bench, what the films have actually used, and every cut's stage trail. No forecasts dressed as facts.</p>
+      </div>
+      <div class="obs-head-side">
+        <span class="obs-asof" id="obs-asof"><span class="pulse"></span> reading the instruments…</span>
+        <button class="btn small" id="obs-refresh" type="button">Refresh</button>
+        <button class="obs-close" id="obs-close" type="button" aria-label="Close the observatory">✕</button>
+      </div>
+    </header>
+    <div class="obs-body" id="obs-body">
+      <section class="obs-section">
+        <div class="obs-section-head">
+          <span class="kicker">The bench</span>
+          <span class="obs-hint">what is available · where it runs · what it needs</span>
+        </div>
+        <div class="obs-providers" id="obs-providers"></div>
+      </section>
+
+      <div class="obs-grid">
+        <section class="obs-section obs-ledger">
+          <div class="obs-section-head">
+            <span class="kicker">The ledger</span>
+            <span class="obs-hint" id="obs-currency">USD</span>
+          </div>
+          <div class="obs-totals" id="obs-totals"></div>
+          <div class="obs-lines" id="obs-lines"></div>
+          <div class="obs-channels" id="obs-channels"></div>
+          <p class="obs-note" id="obs-note"></p>
+          <details class="obs-rates" id="obs-rates">
+            <summary>Rate card</summary>
+            <p class="obs-rates-note">Rates start at zero because the studio runs locally. Add a rate only if a provider bills you.</p>
+            <div class="obs-rate-grid" id="obs-rate-grid"></div>
+            <button class="btn primary small" id="obs-save-rates" type="button">Update the ledger</button>
+          </details>
+        </section>
+
+        <section class="obs-section obs-pipe">
+          <div class="obs-section-head">
+            <span class="kicker">The pipeline</span>
+            <span class="obs-hint" id="obs-pipe-hint">artefacts · stage trail</span>
+          </div>
+          <div class="obs-films" id="obs-films"></div>
+          <div class="obs-recent-head">
+            <span class="kicker">Recent stages</span>
+            <span class="obs-hint">tap one to open the film</span>
+          </div>
+          <ol class="obs-recent" id="obs-recent"></ol>
+        </section>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ FILM DRAWER ============ -->
   <div class="drawer-veil" id="drawer-veil" hidden></div>
   <aside class="drawer" id="drawer" hidden></aside>
@@ -308,14 +370,16 @@
       <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
       <span><kbd>↵</kbd> run</span>
       <span><kbd>esc</kbd> close</span>
-      <span class="palette-keys">1–5 views · T theme · B bell</span>
+      <span class="palette-keys">1–5 views · O observatory · T mood · B bell</span>
     </div>
   </div>
 
   <footer class="colophon">
     <span>Ghostlight Studio — every film written, scored, painted and uploaded by the machine. No faces. No repeats.</span>
-    <span class="key-hints"><kbd>⌘</kbd><kbd>K</kbd> palette · <kbd>1</kbd>–<kbd>5</kbd> views · <kbd>T</kbd> light · <kbd>B</kbd> bell</span>
+    <span class="key-hints"><kbd>⌘</kbd><kbd>K</kbd> palette · <kbd>1</kbd>–<kbd>5</kbd> views · <kbd>O</kbd> observatory · <kbd>T</kbd> mood · <kbd>B</kbd> bell</span>
   </footer>
+
+  <div class="mood-whisper" id="mood-whisper" hidden></div>
 
   <script src="app.js"></script>
 </body>

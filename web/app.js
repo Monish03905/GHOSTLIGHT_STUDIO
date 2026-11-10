@@ -197,6 +197,7 @@ function connectStream() {
     try {
       const event = JSON.parse(msg.data);
       pushLog(event);
+      if (event.kind === 'stage') scheduleObservatoryReload();
       if (['studio', 'schedule', 'youtube', 'autopilot', 'distribution', 'repurpose', 'film',
         'quality', 'approval', 'publish', 'clip', 'language', 'library', 'failure'].includes(event.kind)) {
         refresh();
@@ -892,6 +893,7 @@ function renderSettings(snapshot) {
 }
 
 function switchView(view) {
+  if (OBS.open) closeObservatory();
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.view === view));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('is-active', v.id === `view-${view}`));
   state.view = view;
@@ -1873,7 +1875,18 @@ const THEME_KEY = 'ghostlight.theme';
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
 const SKY = { canvas: null, ctx: null, stars: [], dpr: 1, px: 0, py: 0, last: 0 };
 
-const currentTheme = () => (document.documentElement.dataset.theme === 'daylight' ? 'daylight' : 'night');
+const THEMES = ['night', 'daylight', 'twilight', 'ember'];
+const THEME_META = {
+  night: { label: 'night', mood: 'Night · the ghost light', meta: '#070b16', star: '216, 238, 255', starAlpha: 1 },
+  daylight: { label: 'daylight', mood: 'Daylight · morning paper', meta: '#f4efe3', star: '46, 74, 108', starAlpha: 0.38 },
+  twilight: { label: 'twilight', mood: 'Twilight · the violet hour', meta: '#120b24', star: '230, 214, 255', starAlpha: 0.8 },
+  ember: { label: 'ember', mood: 'Ember · the last fire', meta: '#160c08', star: '255, 214, 170', starAlpha: 0.75 },
+};
+
+const currentTheme = () => {
+  const saved = document.documentElement.dataset.theme;
+  return THEMES.includes(saved) ? saved : 'night';
+};
 
 function paintSky() {
   const { ctx, canvas } = SKY;
@@ -1882,14 +1895,14 @@ function paintSky() {
   const h = window.innerHeight;
   ctx.setTransform(SKY.dpr, 0, 0, SKY.dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const day = currentTheme() === 'daylight';
+  const theme = THEME_META[currentTheme()];
   for (const star of SKY.stars) {
     const alpha = star.a * (0.55 + 0.45 * Math.sin(star.tw));
     const x = ((((star.x + SKY.px * 0.018) % 1) + 1) % 1) * w;
     const y = ((((star.y + SKY.py * 0.018) % 1) + 1) % 1) * h;
     ctx.beginPath();
     ctx.arc(x, y, star.r, 0, Math.PI * 2);
-    ctx.fillStyle = day ? `rgba(46, 74, 108, ${alpha * 0.38})` : `rgba(216, 238, 255, ${alpha})`;
+    ctx.fillStyle = `rgba(${theme.star}, ${alpha * theme.starAlpha})`;
     ctx.fill();
   }
 }
@@ -1948,24 +1961,51 @@ function seedSky() {
   else requestAnimationFrame(frameSky);
 }
 
+let moodTimer = null;
+
+function whisperMood(theme) {
+  const el = $('#mood-whisper');
+  if (!el) return;
+  const meta = THEME_META[theme] || THEME_META.night;
+  el.textContent = meta.mood;
+  el.hidden = false;
+  el.classList.remove('is-in');
+  void el.offsetWidth;
+  el.classList.add('is-in');
+  clearTimeout(moodTimer);
+  moodTimer = setTimeout(() => {
+    el.classList.remove('is-in');
+    setTimeout(() => { el.hidden = true; }, 320);
+  }, 1600);
+}
+
 function applyTheme(theme, persist) {
-  if (theme === 'daylight') document.documentElement.dataset.theme = 'daylight';
-  else delete document.documentElement.dataset.theme;
+  const mood = THEMES.includes(theme) ? theme : 'night';
+  document.documentElement.dataset.theme = mood;
+  const meta = THEME_META[mood];
   const btn = $('#theme-toggle');
   if (btn) {
-    btn.setAttribute('aria-label', theme === 'daylight' ? 'Switch to night' : 'Switch to daylight');
-    btn.title = theme === 'daylight' ? 'Ghost light, please (T)' : 'Switch the light (T)';
+    const next = THEMES[(THEMES.indexOf(mood) + 1) % THEMES.length];
+    btn.setAttribute('aria-label', `Change the mood — currently ${meta.label}`);
+    btn.title = `${meta.label} · next ${next} (T)`;
   }
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === 'daylight' ? '#f4efe3' : '#070b16';
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.content = meta.meta;
   if (persist) {
-    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+    try { localStorage.setItem(THEME_KEY, mood); } catch (_) {}
+    whisperMood(mood);
   }
   paintSky();
 }
 
 function toggleTheme() {
-  applyTheme(currentTheme() === 'daylight' ? 'night' : 'daylight', true);
+  const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
+  applyTheme(next, true);
+}
+
+function setTheme(theme) {
+  if (theme === currentTheme()) return;
+  applyTheme(theme, true);
 }
 
 function tickClock() {
@@ -1986,6 +2026,220 @@ function seekFilm(start) {
   } catch (_) {}
 }
 
+const OBS = { open: false, data: null, loading: false, timer: null };
+
+function obsMoney(ledger, value) {
+  return `${esc(ledger.currency || 'USD')} ${Number(value || 0).toFixed(2)}`;
+}
+
+function renderObservatoryProviders(rows) {
+  const grid = $('#obs-providers');
+  if (!grid) return;
+  grid.innerHTML = rows.map((p) => `
+    <article class="obs-provider ${p.available ? '' : 'is-down'}" data-provider="${esc(p.id)}">
+      <button class="obs-provider-top" type="button" aria-expanded="false">
+        <span class="obs-provider-label">${esc(p.label)}<em>${esc(p.group)}</em></span>
+        <span class="obs-state ${p.available ? 'on' : 'off'}"><i></i>${p.available ? 'ready' : 'offline'}</span>
+      </button>
+      <div class="obs-provider-name">${esc(p.provider)}${p.model ? ` <span>· ${esc(p.model)}</span>` : ''}</div>
+      <div class="obs-provider-tags">
+        <span class="obs-tag ${p.local ? 'is-local' : 'is-network'}">${p.local ? 'on this machine' : 'network'}</span>
+        <span class="obs-tag">${esc(p.requested)}</span>
+      </div>
+      <p class="obs-provider-detail">${esc(p.detail)}</p>
+    </article>`).join('');
+  grid.querySelectorAll('.obs-provider').forEach((card) => {
+    const head = card.querySelector('.obs-provider-top');
+    head.addEventListener('click', () => {
+      const open = card.classList.toggle('is-open');
+      head.setAttribute('aria-expanded', String(open));
+    });
+  });
+}
+
+function renderObservatoryLedger(ledger) {
+  const totals = ledger.totals;
+  $('#obs-currency').textContent = ledger.currency || 'USD';
+  $('#obs-totals').innerHTML = `
+    <div class="obs-stat"><b>${fmtNum(totals.films)}</b><span>films</span></div>
+    <div class="obs-stat"><b>${fmtNum(totals.words)}</b><span>words written</span></div>
+    <div class="obs-stat"><b>${fmtNum(totals.voiced_minutes)}<i>m</i></b><span>voiced</span></div>
+    <div class="obs-stat"><b>${fmtNum(totals.uploads)}</b><span>uploads</span></div>
+    <div class="obs-stat is-money"><b>${obsMoney(ledger, totals.estimate)}</b><span>estimate</span></div>`;
+
+  const max = Math.max(0, ...ledger.lines.map((line) => Number(line.estimate) || 0));
+  $('#obs-lines').innerHTML = ledger.lines.map((line) => {
+    const usage = line.key === 'storage' ? Number(line.usage).toFixed(3) : fmtNum(line.usage);
+    const width = max > 0 ? Math.round((Number(line.estimate) / max) * 100) : 0;
+    return `<div class="obs-line">
+      <div class="obs-line-head">
+        <span class="obs-line-label">${esc(line.label)}</span>
+        <span class="obs-line-use">${usage} ${esc(line.unit)}</span>
+        <span class="obs-line-rate">${fmtNum(line.rate)} <em>${esc(line.rate_unit)}</em></span>
+        <b class="obs-line-cost">${obsMoney(ledger, line.estimate)}</b>
+      </div>
+      <div class="obs-line-bar"><i style="width:${width}%"></i></div>
+      <p class="obs-line-note">${esc(line.note)}</p>
+    </div>`;
+  }).join('');
+
+  const channels = ledger.channels || [];
+  $('#obs-channels').innerHTML = channels.length ? `
+    <span class="kicker obs-subkicker">By voice</span>
+    ${channels.map((row) => `
+      <div class="obs-channel-row">
+        <span class="obs-channel-name">${esc(row.name)}</span>
+        <span class="obs-channel-use">${row.films} film${row.films === 1 ? '' : 's'} · ${fmtNum(row.words)} words</span>
+        <b>${obsMoney(ledger, row.estimate)}</b>
+      </div>`).join('')}` : '';
+
+  $('#obs-note').textContent = ledger.note;
+  $('#obs-rate-grid').innerHTML = Object.entries(ledger.rates).map(([key, value]) => `
+    <label class="obs-rate">
+      <span>${esc((ledger.rate_labels || {})[key] || key)}</span>
+      <input type="number" min="0" step="0.01" inputmode="decimal" data-rate="${esc(key)}" value="${Number(value) || 0}" />
+    </label>`).join('');
+
+  $('#obs-save-rates')?.addEventListener('click', async () => {
+    const button = $('#obs-save-rates');
+    const body = {};
+    document.querySelectorAll('#obs-rate-grid input[data-rate]').forEach((input) => {
+      body[`costs.${input.dataset.rate}`] = Math.max(0, Number(input.value) || 0);
+    });
+    button.disabled = true;
+    button.textContent = 'Updating…';
+    try {
+      await api('/api/settings', { method: 'PATCH', body });
+      await loadObservatory(true);
+    } catch (exc) {
+      $('#obs-asof').textContent = `Could not update rates — ${exc.message}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Update the ledger';
+    }
+  });
+}
+
+function obsTrailRows(trail) {
+  return trail.map((event) => `
+    <li class="obs-trail-row level-${esc(event.level || 'info')}">
+      <span class="obs-trail-time">${esc(fmtWhen(event.ts))}</span>
+      <span class="obs-trail-stage">${esc(event.stage || event.kind)}</span>
+      <span class="obs-trail-msg">${esc(event.message || '')}</span>
+      ${event.progress != null ? `<span class="obs-trail-pct">${fmtNum(event.progress)}%</span>` : ''}
+    </li>`).join('');
+}
+
+function renderObservatoryPipeline(pipeline) {
+  const films = $('#obs-films');
+  if (!films) return;
+  $('#obs-pipe-hint').textContent = `${pipeline.films.length} recent · ${pipeline.recent.length} live stage events`;
+
+  if (!pipeline.films.length) {
+    films.innerHTML = `<p class="obs-empty">The bench is quiet. Make a short and its stages will appear here.</p>`;
+  } else {
+    films.innerHTML = pipeline.films.map((film) => {
+      const poster = film.poster_path
+        ? `<img src="/api/videos/${esc(film.id)}/file/poster" alt="" loading="lazy" />`
+        : '<span class="obs-film-glyph">✳</span>';
+      const stages = film.stages.map((stage) => `
+        <span class="obs-stage ${stage.done ? 'is-done' : ''}" title="${esc(stage.label)} — ${esc(stage.hint)}">
+          <i></i>${esc(stage.label)}
+        </span>`).join('');
+      const trail = film.trail.length ? `
+        <details class="obs-trail">
+          <summary>${film.trail.length} event${film.trail.length === 1 ? '' : 's'} on the stage trail</summary>
+          <ol>${obsTrailRows(film.trail)}</ol>
+        </details>` : '';
+      return `<article class="obs-film">
+        <div class="obs-film-row">
+          <button class="obs-poster" type="button" data-obs-video="${esc(film.id)}" aria-label="Open ${esc(film.title)}">${poster}</button>
+          <div class="obs-film-main">
+            <div class="obs-film-head">
+              <button class="obs-film-title" type="button" data-obs-video="${esc(film.id)}">${esc(film.title)}</button>
+              <span class="obs-status st-${esc(film.status)}">${esc(film.status)}</span>
+            </div>
+            <div class="obs-film-meta">${film.format === 'long' ? 'long form' : 'short'} · ${fmtWhen(film.created_at)}</div>
+            <div class="obs-progress"><i style="width:${film.progress}%"></i></div>
+            <div class="obs-stages">${stages}</div>
+          </div>
+        </div>
+        ${trail}
+      </article>`;
+    }).join('');
+  }
+
+  $('#obs-recent').innerHTML = pipeline.recent.length ? pipeline.recent.map((event) => `
+    <li>
+      <button type="button" class="obs-recent-row" data-obs-video="${esc(event.video_id)}">
+        <span class="obs-recent-stage">${esc(event.stage)}</span>
+        <span class="obs-recent-body">
+          <strong>${esc(event.title || event.video_id || 'the studio')}</strong>
+          <em>${esc(event.message || '')}</em>
+        </span>
+        <span class="obs-recent-side">${event.progress != null ? `${fmtNum(event.progress)}%` : ''}<small>${esc(fmtWhen(event.ts))}</small></span>
+      </button>
+    </li>`).join('') : `<li class="obs-empty-row">No stage events yet. The live trail starts with the next film.</li>`;
+}
+
+function openFilmFromObservatory(id) {
+  if (!id) return;
+  closeObservatory();
+  openDrawer(id);
+}
+
+function renderObservatory() {
+  const data = OBS.data;
+  if (!data) return;
+  $('#obs-asof').innerHTML = `<span class="pulse"></span> read at ${esc(new Date(data.as_of).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))}`;
+  renderObservatoryProviders(data.providers || []);
+  renderObservatoryLedger(data.ledger);
+  renderObservatoryPipeline(data.pipeline);
+}
+
+async function loadObservatory(force) {
+  if (OBS.loading) return;
+  OBS.loading = true;
+  if (force) $('#obs-asof').innerHTML = '<span class="pulse"></span> re-reading the instruments…';
+  try {
+    OBS.data = await api('/api/observatory');
+    renderObservatory();
+  } catch (exc) {
+    $('#obs-asof').textContent = `Instruments unavailable — ${exc.message}`;
+  }
+  OBS.loading = false;
+}
+
+function openObservatory() {
+  const box = $('#observatory');
+  const veil = $('#obs-veil');
+  if (!box || !veil || OBS.open) return;
+  OBS.open = true;
+  box.hidden = false;
+  veil.hidden = false;
+  document.documentElement.classList.add('has-observatory');
+  $('#obs-open')?.setAttribute('aria-expanded', 'true');
+  loadObservatory();
+  requestAnimationFrame(() => $('#obs-close')?.focus({ preventScroll: true }));
+}
+
+function closeObservatory() {
+  const box = $('#observatory');
+  const veil = $('#obs-veil');
+  if (!box || !OBS.open) return;
+  OBS.open = false;
+  box.hidden = true;
+  veil.hidden = true;
+  document.documentElement.classList.remove('has-observatory');
+  $('#obs-open')?.setAttribute('aria-expanded', 'false');
+}
+
+function scheduleObservatoryReload() {
+  if (!OBS.open) return;
+  clearTimeout(OBS.timer);
+  OBS.timer = setTimeout(() => loadObservatory(true), 700);
+}
+
 const PALETTE = { open: false, items: [], nodes: [], active: 0 };
 
 function paletteItems() {
@@ -2001,6 +2255,10 @@ function paletteItems() {
   }));
 
   items.push(
+    { group: 'Mood', glyph: '◐', title: 'Night', hint: currentTheme() === 'night' ? 'the room right now' : 'navy stage, aurora light', kind: 'mood', run: () => setTheme('night') },
+    { group: 'Mood', glyph: '◑', title: 'Daylight', hint: currentTheme() === 'daylight' ? 'the room right now' : 'warm paper, ink type', kind: 'mood', run: () => setTheme('daylight') },
+    { group: 'Mood', glyph: '◒', title: 'Twilight', hint: currentTheme() === 'twilight' ? 'the room right now' : 'violet hour, rose horizon', kind: 'mood', run: () => setTheme('twilight') },
+    { group: 'Mood', glyph: '◓', title: 'Ember', hint: currentTheme() === 'ember' ? 'the room right now' : 'last fire, rust and gold', kind: 'mood', run: () => setTheme('ember') },
     { group: 'Do', glyph: '✳', title: 'Make a short', hint: 'write, voice, score and cut a new short', kind: 'action', run: () => runCommand('make a short') },
     { group: 'Do', glyph: '✳', title: 'Make a long film', hint: 'a longer piece with chapters', kind: 'action', run: () => runCommand('make a long film') },
     { group: 'Do', glyph: '▲', title: 'Upload the latest film', hint: 'send the newest ready film to its channel', kind: 'action', run: () => runCommand('upload the latest film') },
@@ -2018,7 +2276,7 @@ function paletteItems() {
         loadNotifications();
       } catch (_) {}
     } },
-    { group: 'Light', glyph: '◐', title: currentTheme() === 'daylight' ? 'Switch to night' : 'Switch to daylight', hint: 'the room changes, the films do not', kind: 'theme', run: toggleTheme },
+    { group: 'Do', glyph: '◎', title: 'Open the observatory', hint: 'providers, costs and every stage trail', kind: 'action', run: openObservatory },
   );
 
   if (state.currentFilm && $('#drawer') && !$('#drawer').hidden) {
@@ -2129,6 +2387,18 @@ function closePalette() {
 }
 
 $('#theme-toggle')?.addEventListener('click', toggleTheme);
+$('#obs-open')?.addEventListener('click', openObservatory);
+$('#obs-close')?.addEventListener('click', closeObservatory);
+$('#obs-veil')?.addEventListener('click', closeObservatory);
+$('#obs-refresh')?.addEventListener('click', () => loadObservatory(true));
+$('#obs-films')?.addEventListener('click', (ev) => {
+  const target = ev.target.closest('[data-obs-video]');
+  if (target) openFilmFromObservatory(target.dataset.obsVideo);
+});
+$('#obs-recent')?.addEventListener('click', (ev) => {
+  const target = ev.target.closest('[data-obs-video]');
+  if (target) openFilmFromObservatory(target.dataset.obsVideo);
+});
 $('#palette-open')?.addEventListener('click', openPalette);
 $('#palette-veil')?.addEventListener('click', closePalette);
 $('#palette-input')?.addEventListener('input', () => { PALETTE.active = 0; renderPalette(); });
@@ -2158,6 +2428,7 @@ document.addEventListener('keydown', (ev) => {
   }
   if (ev.key === 'Escape') {
     if (PALETTE.open) { closePalette(); return; }
+    if (OBS.open) { closeObservatory(); return; }
     closeDrawer();
     if (!$('#channel-modal').hidden) closeChannelModal();
     return;
@@ -2171,6 +2442,11 @@ document.addEventListener('keydown', (ev) => {
     return;
   }
   if (ev.key.toLowerCase() === 't') { toggleTheme(); return; }
+  if (ev.key.toLowerCase() === 'o') {
+    if (OBS.open) closeObservatory();
+    else openObservatory();
+    return;
+  }
   if (ev.key.toLowerCase() === 'b') { toggleBell(); return; }
   if (ev.key === '/') {
     ev.preventDefault();
