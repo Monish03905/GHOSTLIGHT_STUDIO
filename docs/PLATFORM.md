@@ -11,7 +11,7 @@ importantly onto what does **not**. Nothing here is a promise of revenue; see
 |---|---|---|
 | **1. Trend radar** | `ghostlight/trends.py`, **The Radar** tab | A curated shelf of ~50 subjects across all eight niches, scored daily by interest, momentum, competition and how well the topic fits the selected channel. Opportunity = 40% interest + 25% momentum + 20% inverse competition + 15% fit. An optional live layer pulls Google Trends RSS (`?live=1`); it is cached for 30 minutes and fails back to the shelf without an error. |
 | **2. AI story & script** | `ghostlight/content.py`, `scriptwriter.py` | Structured brief → hook → segments → close, with a per-format signature and chapter headings for long form. Uses OpenAI / Anthropic / Gemini / Ollama when configured, otherwise the offline "Muse". Every draft must clear the novelty ledger (`novelty.py`) — films are standalone by construction. |
-| **3. AI video generation** | `ghostlight/visuals.py`, `render.py` | Not a text-to-video API. The studio paints its own plates (7 styles × 16 palettes), adds layered parallax, camera moves, grain, transitions and burned-in captions, then composes the film with ffmpeg. Deterministic, free, and never reuses stock footage. |
+| **3. AI video generation** | `ghostlight/visuals.py`, `render.py` | Not a text-to-video API. The studio paints its own plates (7 styles × 17 palettes), adds layered parallax, camera moves, grain, transitions and burned-in captions, then composes the film with ffmpeg. Deterministic, free, and never reuses stock footage. |
 | **4. Humanised voices** | `ghostlight/tts.py` | Piper neural TTS (default), Edge, OpenAI, ElevenLabs or the system voice, with per-word timings used for karaoke captions. Each channel gets a stable voice choice. Emotion is carried by scripting and pacing, not a per-sentence emotion parameter. |
 | **5. Music & SFX** | `ghostlight/music.py`, `render.py` | numpy-composed pads and rhythm matched to the script's mood, sidechain-ducked under narration and loudness-normalised to roughly −14 LUFS. No third-party library of tracks. |
 | **6. AI editor / retention** | `render.py` | Pacing is derived from narration length (scene count, shot length, 0.7 s / 1.1 s transitions), captions keep the eye moving, and a hook is written first. There is no frame-by-frame retention model; the editor is a deterministic rule set, not a learned one. |
@@ -23,7 +23,7 @@ importantly onto what does **not**. Nothing here is a promise of revenue; see
 | **12. AI brain** | `showrunner.py`, `autopilot` settings | A per-channel playbook learns which niches, registers and hours travel, then re-weights tomorrow's choices while keeping an exploration slice. This is an adaptive bandit over real analytics — not a trained model, and it never invents numbers. |
 | **13. Multi-account** | `channels.py`, `secrets/channels/<id>/` | Any number of voices, each with its own token, client secret, quota, airtimes, visibility, approval mode and analytics. |
 | **14. Idea wall & calendar** | `ideas.py`, **The Radar** tab | Original pitch cards with an angle, question and director's guidance; one click turns a pitch into a commission. The calendar shows planned airtimes, ready films, films in production and what already published — and says "empty" when it is empty. |
-| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream. Installable on desktop and mobile; the shell is cached for offline reading while all studio state stays network-only. |
+| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream. Installable on desktop and mobile; shell assets are fetched network-first so an update lands on the next load, with the cache used only offline. All studio state stays network-only. |
 | **16. Vertical repurposing** | `ghostlight/repurpose.py`, `orchestrator.repurpose` | Cuts complete-thought clips from a finished film using the word timings in `narration.json`. Windows are 15–60 s, non-overlapping, deduplicated by digest and text overlap, and never split a spoken sentence. Each cut becomes its own vertical child record (`kind=clip`) with blurred-fill framing, fitted foreground and burned-in captions, so the normal gate, approval, share-kit and upload paths work unchanged. |
 | **17. Localization** | `ghostlight/languages.py`, the film drawer | The configured model translates title, hook, description, tags and every spoken segment into Hindi, Telugu, Tamil, Spanish, French, German or Portuguese. Segment counts are validated and unchanged source text is rejected rather than passed off as a translation. Captions keep the original timings; a localized voiceover is recorded only when `edge-tts` is reachable and is labelled with its real provider. |
 | **18. Editorial read** | `ghostlight/editorial.py`, the film drawer | A deterministic second read of the script: hook, pacing, clarity, payoff, invitation, repetition, structure and rights flags, with a 0–100 score, concrete notes and hook starting points. It calls no model and explicitly labels its retention band a structural guess, not a forecast. |
@@ -77,6 +77,20 @@ infrastructure or review processes that no local build can supply honestly.
   fastest routes to a policy strike.
 - **No revenue guarantee.** The quality gate and radar improve the odds of a
   film being watchable and timely. They cannot promise subscribers or income.
+
+## Reliability notes
+
+- **Local models are not routed through proxies.** Ollama is reached on
+  localhost with proxy environment ignored, so a malformed `NO_PROXY` entry
+  cannot fail the call before the socket opens.
+- **Slow models fail honestly.** Provider calls time out (120 s for
+  localization) and the attempt is stored as `failed` with the reason. No
+  translation, caption or voice is fabricated to fill the gap.
+- **Updates are not trapped behind the PWA cache.** Shell assets are
+  network-first and fall back to the cache only offline; API responses are
+  never cached.
+- **Notifications are durable, the log is not.** The bell reads from SQLite
+  and survives restarts; the desk log is the transient event stream.
 
 ## Approval modes at a glance
 
