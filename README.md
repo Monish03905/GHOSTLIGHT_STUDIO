@@ -357,6 +357,21 @@ Every publish produces the whole package, not just a video:
 - An **RSS feed** at `/feed.xml` for the public shelf
 - `status.containsSyntheticMedia` set on every upload when `youtube.disclose_ai` is on
 
+### Instagram, TikTok and the fact-check panel
+
+<p align="center">
+  <img src="docs/assets/social-kit.webp" alt="The share kit with its caption, SRT download and Send to Instagram / Send to TikTok actions" width="49%">
+  <img src="docs/assets/research.webp" alt="The fact-check triage panel: claims with verdicts, source links and the fixed caveat" width="49%">
+</p>
+
+The share kit can carry the film onward. **Send to Instagram** publishes a Reel through the Graph API and **Send to TikTok** posts through the Content Posting API — both stay disabled until you supply your own app credentials and a public HTTPS address, and neither fires without a per-post confirmation. Media is served through a signed, expiring link (`GET /api/social/media/{id}`), so no provider ever receives a token that points at your disk.
+
+The **fact-check panel** reads the narration, pulls claims that carry a number, a name or a superlative, searches an allowlist of sources (Wikipedia, OpenAlex, and an optional SearXNG), and files each claim as *supported*, *related* or *unmatched* — keeping the links and the fixed note that this is triage, not verification.
+
+**AI shots** live in The knobs under `ai_video.*`. When enabled, the studio asks OpenAI Videos or Replicate for a few silent, faceless moving bases and lays the narration and score over them. Budget and per-clip cost are checked before any call, and the upload keeps its synthetic-media disclosure.
+
+Setup guides: [docs/SOCIAL_SETUP.md](docs/SOCIAL_SETUP.md) · [docs/AI_VIDEO.md](docs/AI_VIDEO.md) · [docs/RESEARCH.md](docs/RESEARCH.md).
+
 ### After the film: cuts, languages, notes
 
 | Tool | Where | What it does |
@@ -646,7 +661,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate (including caption drift and a real loudness pass on a rendered clip), thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation across the expanded registry, the editorial read, the readout's measured signals and honest waiting state, durable notifications, the library's export, backup and guarded prune, and the observatory's provider bench, cost ledger, pre-flight forecast and pipeline trail. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
+The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate (including caption drift and a real loudness pass on a rendered clip), thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation across the expanded registry, the editorial read, the readout's measured signals and honest waiting state, durable notifications, the library's export, backup and guarded prune, the observatory's provider bench, cost ledger, pre-flight forecast and pipeline trail, social publishing against mocked provider APIs, AI-video prompting and budget clamps, and the research triage's claim extraction and source matching. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
 
 <div align="center">
 <br>
