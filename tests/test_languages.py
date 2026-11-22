@@ -48,8 +48,11 @@ def _translator(language: str = "hi"):
 def test_language_registry_covers_requested_voices():
     codes = {lang["code"] for lang in languages.options()}
     assert {"en", "hi", "te", "ta"} <= codes
+    assert {"bn", "mr", "gu", "kn", "ml", "ar", "ja"} <= codes
     assert languages.get_language("TE").native == "తెలుగు"
     assert languages.get_language("te").edge_voice.startswith("te-IN-")
+    assert languages.get_language("ml").edge_voice == "ml-IN-MidhunNeural"
+    assert languages.get_language("ar").native == "العربية"
     with pytest.raises(languages.LocalizationError):
         languages.get_language("xx")
 

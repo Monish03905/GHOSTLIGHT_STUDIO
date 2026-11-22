@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
-from ghostlight import quality
+from ghostlight import ffmpeg, quality
 from ghostlight.app import create_app
 from ghostlight.channels import ensure_lineup
 from ghostlight.db import Database
@@ -43,6 +45,50 @@ def test_gate_passes_hard_checks_without_a_probe(tmp_path, cfg):
     report = quality.inspect(cfg, _bare_video(video_path=str(small)), None)
     assert report["hard_fail"] is True
     assert any(c["name"] == "file" and c["status"] == "fail" for c in report["checks"])
+
+
+def _shot(tmp_path):
+    path = tmp_path / "film.mp4"
+    ffmpeg.run([
+        "-y",
+        "-f", "lavfi", "-i", "testsrc2=size=720x1280:rate=24:duration=4",
+        "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=44100:duration=4",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+        str(path),
+    ])
+    return path
+
+
+def _timing(tmp_path, start, end):
+    (tmp_path / "narration.json").write_text(json.dumps({
+        "words": [{"word": "a", "start": start, "end": end}],
+        "segments": [{"text": "one line"}],
+    }), encoding="utf-8")
+
+
+def test_gate_measures_caption_drift(tmp_path, cfg):
+    video_path = _shot(tmp_path)
+    video = _bare_video(video_path=str(video_path), duration=0.0,
+                        narration_path=str(tmp_path / "narration.wav"))
+
+    _timing(tmp_path, 0.2, 3.4)
+    report = quality.inspect(cfg, video, None)
+    sync = next(c for c in report["checks"] if c["name"] == "sync")
+    assert sync["status"] == "pass"
+
+    _timing(tmp_path, 0.2, 0.8)
+    report = quality.inspect(cfg, video, None)
+    sync = next(c for c in report["checks"] if c["name"] == "sync")
+    assert sync["status"] == "warn"
+    assert "drift" in sync["detail"]
+
+
+def test_gate_listens_to_the_mix(tmp_path, cfg):
+    video_path = _shot(tmp_path)
+    report = quality.inspect(cfg, _bare_video(video_path=str(video_path), duration=0.0), None)
+    volume = next(c for c in report["checks"] if c["name"] == "volume")
+    assert volume["status"] in {"pass", "warn"}
+    assert "dB" in volume["detail"]
 
 
 def test_channel_approval_round_trips_through_the_api(cfg):

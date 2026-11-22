@@ -278,6 +278,98 @@ def _ledger(cfg: Any, db: Any) -> dict[str, Any]:
     }
 
 
+DEFAULT_MEGABYTES_PER_MINUTE = 30.0
+
+
+def _size_per_minute(db: Any) -> tuple[float, str]:
+    measured = [
+        (int(row.get("bytes") or 0), float(row.get("duration") or 0))
+        for row in db.all_video_rows()
+        if row.get("video_path")
+    ]
+    measured = [(size, seconds) for size, seconds in measured if size > 0 and seconds > 0]
+    if measured:
+        minutes = sum(seconds for _, seconds in measured) / 60.0
+        if minutes > 0:
+            return sum(size for size, _ in measured) / minutes, "measured"
+    return DEFAULT_MEGABYTES_PER_MINUTE * 1024 ** 2, "assumed"
+
+
+def _forecast(cfg: Any, db: Any) -> dict[str, Any]:
+    wpm = int(cfg.get("script.words_per_minute", 152) or 152)
+    writer_rate = _rate(cfg, "writer_per_1k_words")
+    voice_rate = _rate(cfg, "voice_per_minute")
+    render_rate = _rate(cfg, "render_per_minute")
+    storage_rate = _rate(cfg, "storage_per_gb_month")
+    bytes_per_minute, basis = _size_per_minute(db)
+
+    rows = []
+    total = 0.0
+    for key, label in (("short", "Short"), ("long", "Long")):
+        window = cfg.get(f"script.{key}_seconds", [28, 46] if key == "short" else [200, 380])
+        try:
+            low, high = float(window[0]), float(window[1])
+        except (TypeError, ValueError, IndexError):
+            low, high = (28.0, 46.0) if key == "short" else (200.0, 380.0)
+        seconds = round((low + high) / 2.0, 1)
+        minutes = seconds / 60.0
+        words = int(round(minutes * wpm))
+        storage_gb = (minutes * bytes_per_minute) / (1024 ** 3)
+
+        lines = [
+            {
+                "key": "writer", "label": "Writing",
+                "usage": words, "unit": "words",
+                "rate": round(writer_rate, 4), "rate_unit": "per 1k",
+                "estimate": round((words / 1000.0) * writer_rate, 2),
+            },
+            {
+                "key": "voice", "label": "Voice",
+                "usage": round(minutes, 1), "unit": "minutes",
+                "rate": round(voice_rate, 4), "rate_unit": "per minute",
+                "estimate": round(minutes * voice_rate, 2),
+            },
+            {
+                "key": "render", "label": "Render",
+                "usage": round(minutes, 1), "unit": "minutes",
+                "rate": round(render_rate, 4), "rate_unit": "per minute",
+                "estimate": round(minutes * render_rate, 2),
+            },
+            {
+                "key": "storage", "label": "Storage",
+                "usage": round(storage_gb, 3), "unit": "GB",
+                "rate": round(storage_rate, 4), "rate_unit": "per GB-month",
+                "estimate": round(storage_gb * storage_rate, 2),
+            },
+        ]
+        estimate = round(sum(line["estimate"] for line in lines), 2)
+        total += estimate
+        rows.append({
+            "key": key,
+            "label": label,
+            "window": [round(low, 1), round(high, 1)],
+            "seconds": seconds,
+            "words": words,
+            "lines": lines,
+            "estimate": estimate,
+        })
+
+    return {
+        "currency": str(cfg.get("costs.currency", "USD") or "USD"),
+        "formats": rows,
+        "total": round(total, 2),
+        "notes": [
+            f"Each format is the midpoint of its length window at {wpm} words per minute.",
+            (
+                "Storage is the average size of your own rendered minutes."
+                if basis == "measured" else
+                f"Storage assumes {DEFAULT_MEGABYTES_PER_MINUTE:.0f} MB per rendered minute until you have films to measure."
+            ),
+            "A forecast, not a bill. Every rate starts at zero on a local-only install.",
+        ],
+    }
+
+
 def _pipeline(db: Any, limit: int = 5) -> dict[str, Any]:
     rows = db.all_video_rows()
     titles = {str(r["id"]): str(r.get("title") or "Untitled") for r in rows}
@@ -357,5 +449,6 @@ def snapshot(cfg: Any, db: Any, youtube: Any) -> dict[str, Any]:
         "as_of": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "providers": _provider_bench(cfg, db, youtube),
         "ledger": _ledger(cfg, db),
+        "forecast": _forecast(cfg, db),
         "pipeline": _pipeline(db),
     }

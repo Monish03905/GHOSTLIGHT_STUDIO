@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from . import (
-    __version__, content, editorial, ideas, languages, library, observatory,
+    __version__, content, editorial, evaluation, ideas, languages, library, observatory,
     publish, quality, repurpose, trends,
 )
 from .channels import (
@@ -518,6 +518,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return studio.publish(video_id, scheduled_for=str(body.get("scheduled_for") or "") or None)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+
+    @app.get("/api/videos/{video_id}/evaluation")
+    def video_evaluation(video_id: str) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        return evaluation.evaluate(item)
 
     @app.get("/api/videos/{video_id}/quality")
     def video_quality(video_id: str, refresh: bool = False) -> dict[str, Any]:

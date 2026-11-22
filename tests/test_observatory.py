@@ -89,6 +89,54 @@ def test_observatory_ledger_counts_measured_usage(cfg, db):
     assert "not a bill" in ledger["note"]
 
 
+def test_observatory_forecast_prices_the_next_film(cfg, db):
+    cfg.set("script.words_per_minute", 150)
+    cfg.set("script.short_seconds", [30, 50])
+    cfg.set("script.long_seconds", [300, 300])
+    cfg.set("costs.writer_per_1k_words", 2.0)
+    cfg.set("costs.voice_per_minute", 1.0)
+    cfg.set("costs.render_per_minute", 0.5)
+    cfg.set("costs.storage_per_gb_month", 0.0)
+
+    forecast = _observatory(cfg)["forecast"]
+    formats = {row["key"]: row for row in forecast["formats"]}
+
+    short = formats["short"]
+    assert short["seconds"] == 40.0
+    assert short["words"] == 100
+    lines = {line["key"]: line for line in short["lines"]}
+    assert lines["writer"]["estimate"] == 0.2
+    assert lines["voice"]["estimate"] == 0.67
+    assert lines["render"]["estimate"] == 0.33
+    assert short["estimate"] == 1.2
+
+    assert formats["long"]["words"] == 750
+    assert formats["long"]["estimate"] == 9.0
+    assert forecast["total"] == 10.2
+    assert forecast["currency"] == "USD"
+    assert any("midpoint" in note for note in forecast["notes"])
+    assert any("MB per rendered minute" in note for note in forecast["notes"])
+
+
+def test_observatory_forecast_measures_storage_from_rendered_films(cfg, db):
+    db.create_video({
+        "id": "film-one",
+        "title": "Rendered",
+        "duration": 60,
+        "video_path": "film.mp4",
+        "bytes": 60 * 1024 ** 2,
+    })
+    cfg.set("costs.storage_per_gb_month", 1.0)
+
+    forecast = _observatory(cfg)["forecast"]
+    short = {row["key"]: row for row in forecast["formats"]}["short"]
+    storage = {line["key"]: line for line in short["lines"]}["storage"]
+
+    assert storage["usage"] == round(37 / 1024, 3)
+    assert storage["estimate"] == 0.04
+    assert any("your own rendered minutes" in note for note in forecast["notes"])
+
+
 def test_observatory_pipeline_reads_artifacts_and_stage_trail(cfg, db):
     db.create_video({
         "id": "film-one",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -179,3 +180,35 @@ def to_wav(source: str | Path, target: str | Path, rate: int = 44100, mono: bool
 
 def wav_duration(path: str | Path) -> float:
     return duration(path)
+
+
+_MEAN_DB = re.compile(r"mean_volume:\s*(-?\d+(?:\.\d+)?) dB")
+_MAX_DB = re.compile(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB")
+
+
+def audio_levels(path: str | Path, timeout: float = 300.0) -> dict[str, float]:
+    """Measure peak and average loudness with ffmpeg's volumedetect."""
+    cmd = [
+        ffmpeg_bin(), "-hide_banner", "-nostdin", "-nostats", "-loglevel", "info",
+        "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", os.devnull,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            creationflags=_no_window(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FFmpegError(f"ffmpeg timed out after {timeout}s") from exc
+    except FileNotFoundError as exc:
+        raise FFmpegError("ffmpeg could not be started") from exc
+    if result.returncode != 0:
+        raise FFmpegError((result.stderr or "").strip()[-1200:] or "volumedetect failed")
+    mean = _MEAN_DB.search(result.stderr or "")
+    peak = _MAX_DB.search(result.stderr or "")
+    if not mean or not peak:
+        raise FFmpegError("volumedetect reported no levels")
+    return {"mean_db": float(mean.group(1)), "max_db": float(peak.group(1))}

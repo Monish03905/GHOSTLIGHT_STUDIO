@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import ffmpeg
+from . import ffmpeg, publish
 
 # The gate is deliberately blunt: a hard fail stops an upload, a warning is
 # only a note for the operator. Everything here must stay deterministic so a
@@ -13,6 +13,25 @@ SHORT_MIN, SHORT_MAX = 8.0, 75.0
 LONG_MIN, LONG_MAX = 90.0, 3600.0
 MIN_BYTES = 40_000
 MIN_BITRATE_KBPS = 350
+MAX_DRIFT = 2.0
+QUIET_MEAN_DB = -30.0
+SILENT_MEAN_DB = -50.0
+CLIP_PEAK_DB = -0.1
+
+
+def _word_span(video: dict[str, Any]) -> float:
+    words = publish.load_narration(video).get("words")
+    if not isinstance(words, list):
+        return 0.0
+    timing = [w for w in words if isinstance(w, dict)]
+    if not timing:
+        return 0.0
+    try:
+        starts = [float(w.get("start") or 0.0) for w in timing]
+        ends = [float(w.get("end") or w.get("start") or 0.0) for w in timing]
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, max(ends) - min(starts))
 
 
 def _check(name: str, status: str, detail: str) -> dict[str, str]:
@@ -102,6 +121,23 @@ def inspect(cfg: Any, video: dict[str, Any], channel: dict[str, Any] | None = No
     elif probe_error:
         warn("probe", f"Could not inspect the file: {probe_error}")
 
+    if probed is not None and audio_streams:
+        try:
+            levels = ffmpeg.audio_levels(video_path)
+        except ffmpeg.FFmpegError as exc:
+            warn("volume", f"Could not measure loudness: {str(exc)[:160]}")
+        else:
+            mean = levels["mean_db"]
+            peak = levels["max_db"]
+            if mean <= SILENT_MEAN_DB:
+                warn("volume", f"Average loudness {mean:.1f} dB — the film is close to silent.")
+            elif mean < QUIET_MEAN_DB:
+                warn("volume", f"Average loudness {mean:.1f} dB is quiet next to the platform.")
+            elif peak >= CLIP_PEAK_DB:
+                warn("volume", f"Peak {peak:.1f} dB may clip on some players.")
+            else:
+                ok("volume", f"Mean {mean:.1f} dB · peak {peak:.1f} dB")
+
     low, high = (SHORT_MIN, SHORT_MAX) if fmt == "short" else (LONG_MIN, LONG_MAX)
     if duration <= 0:
         fail("duration", "The film has no measurable length.")
@@ -124,6 +160,18 @@ def inspect(cfg: Any, video: dict[str, Any], channel: dict[str, Any] | None = No
     else:
         warn("captions", "No caption file — uploads lose the subtitle pass.")
 
+    span = _word_span(video)
+    if span <= 0:
+        warn("sync", "No word timings to check the captions against.")
+    elif duration <= 0:
+        warn("sync", "No film length to compare the narration against.")
+    else:
+        drift = abs(span - duration)
+        if drift > MAX_DRIFT:
+            warn("sync", f"Narration spans {span:.1f}s against a {duration:.1f}s film — {drift:.1f}s of drift.")
+        else:
+            ok("sync", f"Narration and picture agree within {drift:.1f}s")
+
     if video.get("thumb_path") and Path(str(video["thumb_path"])).is_file():
         ok("thumbnail", "Thumbnail on disk.")
     else:
@@ -140,6 +188,21 @@ def inspect(cfg: Any, video: dict[str, Any], channel: dict[str, Any] | None = No
         warn("novelty", f"Novelty {novelty:.2f} is close to the floor; the idea echoes recent films.")
     else:
         ok("novelty", f"Novelty {novelty:.2f}")
+
+    editorial = video.get("editorial")
+    if isinstance(editorial, dict) and editorial.get("ok"):
+        score = int(editorial.get("score") or 0)
+        weak = [
+            str(c.get("label") or c.get("key") or "a check")
+            for c in editorial.get("checks") or []
+            if c.get("grade") == "fail"
+        ]
+        if weak:
+            warn("script", f"Editorial read flags {', '.join(weak)} ({score}/100).")
+        elif score < 60:
+            warn("script", f"Editorial read scores {score}/100 — thin structure.")
+        else:
+            ok("script", f"Editorial read scores {score}/100")
 
     if channel:
         if str(channel.get("id") or "") == str(video.get("channel_id") or ""):

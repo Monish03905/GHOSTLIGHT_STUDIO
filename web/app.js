@@ -26,6 +26,13 @@ const LANG_OPTIONS = [
   { code: 'hi', label: 'Hindi', native: 'हिन्दी' },
   { code: 'te', label: 'Telugu', native: 'తెలుగు' },
   { code: 'ta', label: 'Tamil', native: 'தமிழ்' },
+  { code: 'bn', label: 'Bengali', native: 'বাংলা' },
+  { code: 'mr', label: 'Marathi', native: 'मराठी' },
+  { code: 'gu', label: 'Gujarati', native: 'ગુજરાતી' },
+  { code: 'kn', label: 'Kannada', native: 'ಕನ್ನಡ' },
+  { code: 'ml', label: 'Malayalam', native: 'മലയാളം' },
+  { code: 'ar', label: 'Arabic', native: 'العربية' },
+  { code: 'ja', label: 'Japanese', native: '日本語' },
   { code: 'es', label: 'Spanish', native: 'Español' },
   { code: 'fr', label: 'French', native: 'Français' },
   { code: 'de', label: 'German', native: 'Deutsch' },
@@ -422,6 +429,7 @@ async function openDrawer(id) {
     <div class="film-actions">${actions.join('')}</div>
     <div class="clip-plan" id="clip-plan" hidden></div>
     ${clipsBlock(v)}
+    ${readoutBlock(v)}
     ${qualityBlock(v)}
     ${editorialBlock(v)}
     ${localizationBlock(v)}
@@ -436,6 +444,7 @@ async function openDrawer(id) {
   `;
   drawer.hidden = false;
   veil.hidden = false;
+  loadReadout(v.id);
 
   drawer.querySelectorAll('[data-act]').forEach((el) => {
     el.addEventListener('click', (ev) => {
@@ -498,6 +507,55 @@ function clipsBlock(v) {
         </button>`).join('')}
     </div>
   </div>`;
+}
+
+function readoutBlock() {
+  return `<div class="readout-block" id="readout-block">
+    <div class="readout-head">
+      <span class="kicker">The readout</span>
+      <span class="readout-state" id="readout-state">reading the files…</span>
+    </div>
+    <div class="readout-body" id="readout-body">
+      <p class="quality-note">Reading the script, the timings and the cut.</p>
+    </div>
+  </div>`;
+}
+
+async function loadReadout(id) {
+  try {
+    const report = await api(`/api/videos/${id}/evaluation`);
+    if (!document.getElementById('readout-body')) return;
+    renderReadout(report);
+  } catch (exc) {
+    const body = document.getElementById('readout-body');
+    if (body) body.innerHTML = `<p class="quality-note">The readout could not open: ${esc(exc.message)}</p>`;
+  }
+}
+
+function renderReadout(report) {
+  const body = document.getElementById('readout-body');
+  const state = document.getElementById('readout-state');
+  if (!body) return;
+  const overall = report.overall == null ? null : Number(report.overall);
+  if (state) state.textContent = `${report.signals} of ${report.signals_total} signals · ${report.band}`;
+  const rows = (report.dimensions || []).map((d) => {
+    const score = d.score == null ? null : Number(d.score);
+    return `<div class="readout-row ${score == null ? 'is-waiting' : ''}">
+      <span class="readout-label">${esc(d.label)}</span>
+      <span class="readout-track"><span class="readout-fill band-${esc(d.band)}" style="width:${score == null ? 0 : Math.max(2, score)}%"></span></span>
+      <b class="readout-score">${score == null ? '—' : score}</b>
+      <em class="readout-detail">${esc(d.detail)}<span class="readout-basis">${esc(d.basis)}</span></em>
+    </div>`;
+  }).join('');
+  const notes = (report.notes || []).map((n) => `<li>${esc(n)}</li>`).join('');
+  body.innerHTML = `
+    <div class="readout-overall band-${esc(report.band)}">
+      <strong>${overall == null ? '—' : overall}<small>/100</small></strong>
+      <span>${overall == null ? 'Waiting for a cut' : esc(report.band) + ' · ' + report.signals + ' signals'}</span>
+    </div>
+    <div class="readout-grid">${rows}</div>
+    <ul class="readout-notes">${notes}</ul>
+    <p class="quality-note">${esc(report.caveat)}</p>`;
 }
 
 function editorialBlock(v) {
@@ -2120,6 +2178,34 @@ function renderObservatoryLedger(ledger) {
   });
 }
 
+function renderObservatoryForecast(forecast) {
+  const grid = $('#obs-forecast');
+  if (!grid) return;
+  const formats = forecast.formats || [];
+  $('#obs-forecast-hint').textContent = `${formats.length} format${formats.length === 1 ? '' : 's'} · at your current rates`;
+  grid.innerHTML = formats.map((format) => `
+    <article class="obs-fcard">
+      <header class="obs-fcard-head">
+        <span class="obs-fcard-label">${esc(format.label)}</span>
+        <span class="obs-fcard-meta">${Math.round(format.window[0])}–${Math.round(format.window[1])}s · ~${fmtNum(format.words)} words</span>
+      </header>
+      <div class="obs-frows">
+        ${format.lines.map((line) => `
+          <div class="obs-frow">
+            <span>${esc(line.label)}</span>
+            <em>${line.key === 'storage' ? Number(line.usage).toFixed(3) : fmtNum(line.usage)} ${esc(line.unit)}</em>
+            <b>${obsMoney(forecast, line.estimate)}</b>
+          </div>`).join('')}
+      </div>
+      <footer class="obs-fcard-foot">
+        <span>one film, start to publish</span>
+        <b>${obsMoney(forecast, format.estimate)}</b>
+      </footer>
+    </article>`).join('');
+  $('#obs-forecast-notes').innerHTML = (forecast.notes || [])
+    .map((note) => `<li>${esc(note)}</li>`).join('');
+}
+
 function obsTrailRows(trail) {
   return trail.map((event) => `
     <li class="obs-trail-row level-${esc(event.level || 'info')}">
@@ -2194,6 +2280,7 @@ function renderObservatory() {
   $('#obs-asof').innerHTML = `<span class="pulse"></span> read at ${esc(new Date(data.as_of).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))}`;
   renderObservatoryProviders(data.providers || []);
   renderObservatoryLedger(data.ledger);
+  if (data.forecast) renderObservatoryForecast(data.forecast);
   renderObservatoryPipeline(data.pipeline);
 }
 
