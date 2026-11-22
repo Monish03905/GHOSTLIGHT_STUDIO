@@ -45,6 +45,17 @@ You talk to it like a person: *"make a short about deep-sea light"*, *"upload th
 
 **It runs with zero API keys.** The built-in Muse writes, numpy synthesises the score, and the renderer paints. Add an LLM, a premium voice or a Google sign-in only when you want them.
 
+**At a glance**
+
+| | |
+| --- | --- |
+| What it is | A single-machine studio that writes, narrates, scores, renders and schedules faceless YouTube Shorts across several channels |
+| Stack | Python 3.12 · FastAPI · SQLite · FFmpeg · Piper TTS · NumPy |
+| Talk to it | Chat console and REST API at `http://127.0.0.1:8787` |
+| First run | `pip install -r requirements.txt` → `python -m ghostlight serve` (needs `ffmpeg` on `PATH`) |
+| Keys | None required to start; LLM, premium voice, YouTube, Instagram and TikTok are opt-in |
+| Start here | [Quick start](#quick-start) · [`docs/PLATFORM.md`](docs/PLATFORM.md) for the module map · [Honest limits](#honest-limits) |
+
 > **Latest additions — 22 November 2026.** Films can now leave the studio for **Instagram Reels and TikTok** through the real Graph and Content Posting APIs — switched off until you bring your own apps and a public HTTPS address, gated by a sharp quality check, and never sent without a per-post confirmation. **AI shots** can join a film as moving bases (OpenAI Videos or Replicate), silent by design and budget-capped. Every drawer also opens a **fact-check triage** panel that searches Wikipedia, OpenAlex and an optional SearXNG instance, matches claims by text and keeps the sources — labelled as triage, never as verification. Three more rooms opened this week: **thumbnail trials** rotate the measured takes on the live video and compare views per equal window, **series** schedule recurring standalone Shorts from a premise, and **the public show** at `/show` presents published films on a login-free page with OG tags and an RSS link. Setup: [docs/SOCIAL_SETUP.md](docs/SOCIAL_SETUP.md), [docs/AI_VIDEO.md](docs/AI_VIDEO.md), [docs/RESEARCH.md](docs/RESEARCH.md). [docs/PLATFORM.md](docs/PLATFORM.md) maps each module and every honest boundary.
 
 ---
