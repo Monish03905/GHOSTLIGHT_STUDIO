@@ -29,6 +29,7 @@
     <a href="#the-network">Network</a> ·
     <a href="#the-quality-gate">Quality gate</a> ·
     <a href="#the-readout">The readout</a> ·
+    <a href="#distribution">Distribution</a> ·
     <a href="#autonomy">Autonomy</a> ·
     <a href="#configuration-atlas">Configuration</a> ·
     <a href="#http-api">API</a> ·
@@ -192,8 +193,8 @@ The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it,
 | **The Desk** | Queue, films in flight, the desk log (server-sent events), and one-click commissions |
 | **The Network** | Channel cards, editorial journal, the next planned film per voice, and *Add a voice* |
 | **The Radar** | Scored trends per niche, the idea wall, the content calendar, and the AI brain's current reading |
-| **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, the readout, chapters, gate, editorial read, clips, languages, share kit and publishing |
-| **The knobs** | Settings, YouTube key and schedule, plus **The archive**: storage, export, backup and a guarded prune |
+| **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, the readout, chapters, gate, editorial read, clips, languages, share kit, thumbnail trial and publishing |
+| **The knobs** | Settings, YouTube key and schedule, **The series** for recurring standalone Shorts, plus **The archive**: storage, export, backup and a guarded prune |
 
 **The stage is interactive.** Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> for the command palette — it searches every view, action, film and chapter of the open film, plus the four moods, and runs the same API calls a click would. Bare keys drive the desk: <kbd>1</kbd>–<kbd>5</kbd> jump between views, <kbd>O</kbd> opens the observatory, <kbd>T</kbd> walks through night → daylight → twilight → ember, <kbd>B</kbd> opens the bell, <kbd>/</kbd> drops into the command bar, and <kbd>Esc</kbd> closes whatever is open, palette first. The masthead runs a live studio clock, and the chosen mood is remembered in `localStorage` across reloads and tabs.
 
@@ -481,6 +482,7 @@ Everything lives in `config.yaml`; `config.local.yaml` overlays it, and `.env` h
 | `youtube.quota_daily_limit` / `upload_cost` | Metering | 10,000 / 1,600 |
 | `youtube.auto_start_schedule` | Resume the schedule when a channel connects | `true` |
 | `distribution.enabled` / `webhook_url` / `rss` | Share kit, webhook, feed | on / empty / on |
+| `thumbnails.arm_hours` | Time each thumbnail arm stays live in a trial (clamped 24–336) | 72 |
 </details>
 
 <details>
@@ -688,7 +690,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate (including caption drift and a real loudness pass on a rendered clip), thumbnail variants, the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation across the expanded registry, the editorial read, the readout's measured signals and honest waiting state, durable notifications, the library's export, backup and guarded prune, the observatory's provider bench, cost ledger, pre-flight forecast and pipeline trail, social publishing against mocked provider APIs, AI-video prompting and budget clamps, and the research triage's claim extraction and source matching. CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
+The suite covers the config and database migrations, the offline Muse and novelty ledger, the quality gate (including caption drift and a real loudness pass on a rendered clip), thumbnail variants and **thumbnail trials** (arm rotation, windowed scoring, the blocked path and stop/keep), the radar and idea engine, LLM failure fallback, the multi-channel API, studio orchestration, clip planning and caption timing, translation validation across the expanded registry, the editorial read, the readout's measured signals and honest waiting state, durable notifications, the library's export, backup and guarded prune, the observatory's provider bench, cost ledger, pre-flight forecast and pipeline trail, social publishing against mocked provider APIs, AI-video prompting and budget clamps, the research triage's claim extraction and source matching, **series** (cadence math, caps, scheduler firing and the no-continuity guidance) and the **public show** (published-only filtering, escaping and Open Graph URLs). CI runs the same suite on Python 3.12 with ffmpeg installed on every push.
 
 <div align="center">
 <br>
