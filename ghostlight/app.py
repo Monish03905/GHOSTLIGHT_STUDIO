@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import (
     __version__, aivideo, content, editorial, evaluation, ideas, languages, library,
-    observatory, publish, quality, repurpose, research, social, trends,
+    observatory, publish, quality, repurpose, research, series, show, social, thumbtest, trends,
 )
 from .channels import (
     CHANNEL_TEMPLATES,
@@ -117,13 +117,30 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     scheduler = Scheduler(cfg, db, bus, studio, showrunner=showrunner)
     commander = Commander(cfg, db, bus, studio, scheduler, youtube)
 
+    trial_stop = threading.Event()
+
+    def _trial_loop() -> None:
+        while not trial_stop.wait(360):
+            try:
+                thumbtest.advance_due(
+                    cfg, db, youtube,
+                    on_event=lambda level, kind, message, video_id="": bus.emit(
+                        kind, message, level=level, video_id=video_id
+                    ),
+                )
+            except Exception as exc:
+                bus.emit("thumbnail", f"Thumbnail trial check skipped: {exc}", level="warning")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
         showrunner.ensure_lineup()
         studio.start()
         scheduler.start()
+        trials = threading.Thread(target=_trial_loop, name="ghostlight-thumbnails", daemon=True)
+        trials.start()
         yield
+        trial_stop.set()
         scheduler.stop()
         studio.stop()
 
@@ -694,6 +711,104 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         )
         return {"id": video_id, "thumb_path": str(path), "variants": updated}
 
+    # -- thumbnail trials -----------------------------------------------
+    @app.get("/api/videos/{video_id}/thumbnail-test")
+    def thumbnail_test_status(video_id: str) -> dict[str, Any]:
+        if not db.get_video(video_id):
+            raise HTTPException(404, "no such film")
+        return thumbtest.status(db, video_id)
+
+    @app.post("/api/videos/{video_id}/thumbnail-test/start")
+    async def thumbnail_test_start(video_id: str, request: Request) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        account = youtube.account(item.get("channel_id"))
+        if not account.connected:
+            raise HTTPException(
+                400,
+                f"Link {account.label()} with Google first; a trial swaps the live thumbnail on YouTube.",
+            )
+        wanted = body.get("variants") if isinstance(body.get("variants"), list) else None
+        try:
+            test = await asyncio.to_thread(
+                thumbtest.start, cfg, db, item,
+                variants=wanted, hours=body.get("arm_hours"), apply=account.set_thumbnail,
+            )
+        except thumbtest.NotEligible as exc:
+            raise HTTPException(400, str(exc))
+        except thumbtest.ThumbTestError as exc:
+            raise HTTPException(409, str(exc))
+        if test.get("status") == "blocked":
+            bus.emit("thumbnail", str(test.get("note") or "Thumbnail trial blocked."), level="warning", video_id=video_id)
+        else:
+            bus.emit(
+                "thumbnail",
+                f"Thumbnail trial started for “{item.get('title', 'a film')}”: "
+                f"{len(test.get('arms') or [])} takes, {int(test.get('arm_seconds') or 0) // 3600} h each.",
+                video_id=video_id,
+            )
+        return thumbtest.status(db, video_id)
+
+    @app.post("/api/videos/{video_id}/thumbnail-test/tick")
+    def thumbnail_test_tick(video_id: str) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        if not item.get("youtube_id"):
+            raise HTTPException(400, "This film has no YouTube video to measure.")
+        account = youtube.account(item.get("channel_id"))
+        if not account.connected:
+            raise HTTPException(400, f"Link {account.label()} with Google to read its analytics.")
+        youtube_id = str(item["youtube_id"])
+
+        def fetch_window(start: str, end: str) -> dict[str, Any]:
+            return account.fetch_window_metrics(youtube_id, start, end)
+
+        try:
+            updated = thumbtest.advance(
+                cfg, db, item, apply=account.set_thumbnail, fetch_window=fetch_window,
+            )
+        except thumbtest.ThumbTestError as exc:
+            raise HTTPException(409, str(exc))
+        if updated and updated.get("status") != "running":
+            bus.emit(
+                "thumbnail",
+                f"Thumbnail trial for “{item.get('title', 'a film')}”: {updated.get('note', '')}",
+                level="success" if updated.get("status") == "concluded" else "info",
+                video_id=video_id,
+            )
+        return thumbtest.status(db, video_id)
+
+    @app.post("/api/videos/{video_id}/thumbnail-test/stop")
+    async def thumbnail_test_stop(video_id: str, request: Request) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        account = youtube.account(item.get("channel_id"))
+        apply = account.set_thumbnail if account.connected else None
+        keep = str(body.get("keep") or "").strip() or None
+        try:
+            updated = await asyncio.to_thread(
+                thumbtest.stop, cfg, db, item, keep=keep, apply=apply,
+            )
+        except thumbtest.ThumbTestError as exc:
+            raise HTTPException(409, str(exc))
+        bus.emit(
+            "thumbnail",
+            f"Thumbnail trial stopped for “{item.get('title', 'a film')}”: {updated.get('note', '')}",
+            video_id=video_id,
+        )
+        return thumbtest.status(db, video_id)
+
     # -- editorial, clips, localization ---------------------------------
     @app.get("/api/videos/{video_id}/editorial")
     def video_editorial(video_id: str, refresh: bool = False) -> dict[str, Any]:
@@ -1101,6 +1216,25 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def feed(limit: int = 40) -> Response:
         return Response(content=publish.rss(db, cfg, limit=limit), media_type="application/rss+xml")
 
+    # -- public show (no login, published films only) --------------------
+    @app.get("/show")
+    def public_show(limit: int = 60) -> Response:
+        limit = max(1, min(120, limit))
+        return Response(
+            content=show.render_index(cfg, db, limit=limit),
+            media_type="text/html; charset=utf-8",
+        )
+
+    @app.get("/show/{video_id}")
+    def public_film(video_id: str) -> Response:
+        item = db.get_video(video_id)
+        if not item or item.get("status") != "published" or item.get("archived"):
+            raise HTTPException(404, "That film is not on the show.")
+        return Response(
+            content=show.render_film(cfg, db, item),
+            media_type="text/html; charset=utf-8",
+        )
+
     # -- events ---------------------------------------------------------
     @app.get("/api/events")
     def events(limit: int = 80, since: int = 0) -> dict[str, Any]:
@@ -1160,6 +1294,72 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def schedule_tick() -> dict[str, Any]:
         scheduler._tick()
         return scheduler.status()
+
+    # -- scheduled series -----------------------------------------------
+    @app.get("/api/series")
+    def list_series() -> dict[str, Any]:
+        now = datetime.now(cfg.timezone())
+        items = [series.public(item, now) for item in db.list_series()]
+        return {"items": items, "count": len(items)}
+
+    @app.get("/api/series/{series_id}")
+    def get_series(series_id: str) -> dict[str, Any]:
+        item = db.get_series(series_id)
+        if not item:
+            raise HTTPException(404, "no such series")
+        return series.public(item, datetime.now(cfg.timezone()))
+
+    @app.post("/api/series")
+    async def create_series(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            item = await asyncio.to_thread(series.create, cfg, db, body)
+        except series.SeriesError as exc:
+            raise HTTPException(400, str(exc))
+        bus.emit(
+            "series",
+            f"Series “{item.get('title')}” scheduled: every {item.get('cadence_days')} day(s) "
+            f"at {item.get('time')}.",
+            level="success",
+        )
+        return series.public(item, datetime.now(cfg.timezone()))
+
+    @app.patch("/api/series/{series_id}")
+    async def update_series(series_id: str, request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            item = await asyncio.to_thread(series.update, cfg, db, series_id, body)
+        except KeyError:
+            raise HTTPException(404, "no such series")
+        except series.SeriesError as exc:
+            raise HTTPException(400, str(exc))
+        return series.public(item, datetime.now(cfg.timezone()))
+
+    @app.delete("/api/series/{series_id}")
+    def delete_series(series_id: str) -> dict[str, Any]:
+        item = db.get_series(series_id)
+        if not item:
+            raise HTTPException(404, "no such series")
+        db.delete_series(series_id)
+        bus.emit("series", f"Series “{item.get('title')}” removed. Its films stay on the shelf.")
+        return {"ok": True, "id": series_id}
+
+    @app.post("/api/series/{series_id}/fire")
+    async def fire_series(series_id: str) -> dict[str, Any]:
+        item = db.get_series(series_id)
+        if not item:
+            raise HTTPException(404, "no such series")
+        try:
+            episode = scheduler.fire_series(series_id)
+        except series.SeriesError as exc:
+            raise HTTPException(400, str(exc))
+        return {"series": series.public(db.get_series(series_id) or item), "episode": episode}
 
     # -- library & maintenance ------------------------------------------
     @app.get("/api/library/storage")

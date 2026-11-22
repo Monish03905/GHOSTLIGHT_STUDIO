@@ -635,6 +635,12 @@ h1, h2, h3, .wordmark, .tagline, .card-title, .panel-title, .network-title,
 .thumb-choice:hover { border-color: rgba(217, 164, 65, 0.55); transform: translateY(-1px); }
 .thumb-choice.chosen { border-color: var(--amber); color: var(--cream); }
 
+.thumb-trial { margin: 12px 0 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; }
+.trial-note { margin: 8px 0; font-size: 12.5px; color: var(--cream-dim); }
+.trial-samples { margin: 8px 0; padding-left: 18px; font-size: 12px; color: var(--cream-dim); }
+.trial-samples li { margin: 2px 0; }
+.trial-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
 .film-actions { display: flex; gap: 10px; margin: 20px 0 8px; flex-wrap: wrap; }
 
 .btn {
@@ -855,6 +861,29 @@ h1, h2, h3, .wordmark, .tagline, .card-title, .panel-title, .network-title,
 .feed-name { color: var(--cream); }
 .feed-times { font-family: var(--mono); font-size: 11px; color: var(--cream-faint); }
 .feed-count { font-family: var(--mono); font-size: 11px; color: var(--cream-dim); }
+
+.series-form { display: grid; gap: 8px; margin: 10px 0 16px; }
+.series-form input, .series-form select {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--cream);
+  font-family: var(--sans);
+  font-size: 13px;
+}
+.series-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.series-row > select { flex: 1 1 130px; width: auto; }
+.series-row label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cream-dim); }
+.series-row input[type="number"], .series-row input[type="time"] { width: 84px; }
+.series-list { display: grid; gap: 10px; }
+.series-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; }
+.series-card.off { opacity: 0.6; }
+.series-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.series-head strong { font-size: 14px; color: var(--cream); }
+.series-premise { margin: 6px 0; font-size: 12.5px; color: var(--cream-dim); }
+.series-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
 
 /* ---------- the network ---------- */
 

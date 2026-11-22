@@ -4,7 +4,7 @@ import threading
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any
 
-from . import content
+from . import content, series
 from .channels import count_today, next_airtime, slot_datetimes
 from .config import Config
 from .db import Database
@@ -169,6 +169,8 @@ class Scheduler:
         channels = self.db.list_channels(include_disabled=False)
         if self.studio.is_busy() or self.studio.queue_size() > 0:
             return
+        if self._tick_series(now):
+            return
         if channels:
             self._tick_channels(now, channels, limit)
         else:
@@ -182,6 +184,45 @@ class Scheduler:
         zone = self.cfg.timezone()
         midnight = datetime.combine(datetime.now(zone).date(), dtime.min, tzinfo=zone)
         return self.db.count_since(midnight.astimezone(timezone.utc).isoformat(timespec="seconds"))
+
+    # -- series ---------------------------------------------------------
+    def _tick_series(self, now: datetime) -> bool:
+        """Start one due series episode; return True when a film was queued."""
+        for item in series.due(self.db, now):
+            if self.studio.is_busy() or self.studio.queue_size() > 0:
+                return False
+            try:
+                self._fire_series(item, now)
+            except series.SeriesError as exc:
+                self.bus.emit("series", f"Series “{item.get('title')}” skipped: {exc}", level="warning")
+                continue
+            return True
+        return False
+
+    def fire_series(self, series_id: str) -> dict[str, Any]:
+        item = self.db.get_series(series_id)
+        if not item:
+            raise KeyError(series_id)
+        return self._fire_series(item, datetime.now(self.cfg.timezone()))
+
+    def _fire_series(self, item: dict[str, Any], now: datetime) -> dict[str, Any]:
+        cap = int(item.get("max_episodes") or 0)
+        if cap and int(item.get("episodes") or 0) >= cap:
+            raise series.SeriesError("This series has reached its episode cap.")
+        episode = int(item.get("episodes") or 0) + 1
+        self.bus.emit(
+            "series",
+            f"“{item.get('title')}” episode {episode} goes into production.",
+        )
+        film = self.studio.request(
+            fmt="short",
+            niche=str(item.get("niche") or "") or None,
+            guidance=series.guidance(item, episode),
+            channel_id=str(item.get("channel_id") or "") or None,
+            style=str(item.get("style") or "") or None,
+        )
+        series.advance(self.db, item, str(film.get("id") or ""), now)
+        return film
 
     # -- multi-channel --------------------------------------------------
     def _tick_channels(self, now: datetime, channels: list[dict[str, Any]], limit: int) -> None:

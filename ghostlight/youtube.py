@@ -431,6 +431,39 @@ class YouTubeClient:
             }
         return out
 
+    def fetch_window_metrics(self, video_id: str, start_date: str, end_date: str) -> dict[str, Any]:
+        """Views and watch time for one video in an explicit window.
+
+        Channel-level reports do not expose impressions or click-through rate
+        (those sit in content-owner reports), so thumbnail trials compare
+        views per equal-length window and say plainly that the vote is a proxy.
+        """
+        if not video_id:
+            return {}
+        metrics = "views,estimatedMinutesWatched,averageViewDuration,subscribersGained"
+        try:
+            report = self._analytics_service().reports().query(
+                ids="channel==MINE",
+                startDate=start_date,
+                endDate=end_date,
+                metrics=metrics,
+                filters=f"video=={video_id}",
+                dimensions="video",
+            )
+            rows = report.execute().get("rows", [])
+        except Exception as exc:
+            self.on_event("warning", "analytics", f"{self.label()} thumbnail window: {_dedupe_notes(exc)}")
+            return {}
+        if not rows or len(rows[0]) < 5:
+            return {}
+        row = rows[0]
+        return {
+            "views": int(row[1] or 0),
+            "watch_minutes": round(float(row[2] or 0), 2),
+            "avg_view_seconds": round(float(row[3] or 0), 2),
+            "subs_gained": int(row[4] or 0),
+        }
+
     def fetch_video_stats(self, video_ids: list[str]) -> dict[str, dict[str, Any]]:
         ids = [v for v in dict.fromkeys(video_ids) if v][:50]
         if not ids:
@@ -622,6 +655,10 @@ class YouTubeClient:
         except Exception as exc:
             self.on_event("warning", "youtube", f"Thumbnail upload skipped: {exc}")
             return False
+
+    def set_thumbnail(self, video_id: str, thumbnail: str | Path) -> bool:
+        """Swap a published video's thumbnail (needs a verified channel)."""
+        return self._set_thumbnail(video_id, thumbnail, None)
 
     def _upload_captions(
         self, video_id: str, captions: str | Path, HttpError: Any, MediaFileUpload: Any

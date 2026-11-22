@@ -70,6 +70,12 @@ CHANNEL_COLUMNS = {
 
 CHANNEL_JSON = {"persona", "niches", "formats", "styles", "times", "playbook"}
 
+SERIES_COLUMNS = {
+    "id", "created_at", "updated_at", "channel_id", "title", "premise", "niche",
+    "style", "cadence_days", "time", "enabled", "max_episodes", "episodes",
+    "next_at", "last_episode_id", "note",
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,
@@ -249,6 +255,43 @@ CREATE TABLE IF NOT EXISTS social_posts (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_social_video ON social_posts(video_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS thumbnail_tests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL,
+    channel_id TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'running',
+    arms TEXT NOT NULL DEFAULT '[]',
+    arm_seconds INTEGER DEFAULT 259200,
+    arm_started_at TEXT DEFAULT '',
+    started_at TEXT DEFAULT '',
+    samples TEXT NOT NULL DEFAULT '[]',
+    winner TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thumb_tests_video ON thumbnail_tests(video_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_thumb_tests_status ON thumbnail_tests(status);
+
+CREATE TABLE IF NOT EXISTS series (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    channel_id TEXT DEFAULT '',
+    title TEXT NOT NULL,
+    premise TEXT DEFAULT '',
+    niche TEXT DEFAULT '',
+    style TEXT DEFAULT '',
+    cadence_days INTEGER DEFAULT 1,
+    time TEXT DEFAULT '18:00',
+    enabled INTEGER DEFAULT 1,
+    max_episodes INTEGER DEFAULT 0,
+    episodes INTEGER DEFAULT 0,
+    next_at TEXT DEFAULT '',
+    last_episode_id TEXT DEFAULT '',
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_series_next ON series(enabled, next_at);
 """
 
 
@@ -851,6 +894,122 @@ class Database:
                 item["detail"] = {}
             out.append(item)
         return out
+
+    # -- thumbnail trials -----------------------------------------------
+    @staticmethod
+    def _decode_test(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        item = dict(row)
+        for col in ("arms", "samples"):
+            try:
+                item[col] = json.loads(item.get(col) or "[]")
+            except json.JSONDecodeError:
+                item[col] = []
+        return item
+
+    def create_thumbnail_test(
+        self,
+        video_id: str,
+        *,
+        channel_id: str = "",
+        arms: list[dict[str, Any]],
+        arm_seconds: int,
+        arm_started_at: str,
+        status: str = "running",
+        note: str = "",
+    ) -> dict[str, Any]:
+        now = utcnow()
+        with self._write_lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO thumbnail_tests "
+                "(video_id, channel_id, status, arms, arm_seconds, arm_started_at, started_at, samples, note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)",
+                (video_id, channel_id, status, _encode(arms), int(arm_seconds), arm_started_at, now, note, now),
+            )
+            test_id = int(cur.lastrowid or 0)
+        return self.get_thumbnail_test(test_id) or {}
+
+    def update_thumbnail_test(self, test_id: int, **fields: Any) -> None:
+        allowed = {"status", "arms", "arm_seconds", "arm_started_at", "samples", "winner", "note"}
+        clean = {k: v for k, v in fields.items() if k in allowed}
+        if not clean:
+            return
+        for col in ("arms", "samples"):
+            if col in clean and not isinstance(clean[col], str):
+                clean[col] = _encode(clean[col])
+        clean["updated_at"] = utcnow()
+        assignments = ", ".join(f"{col} = ?" for col in clean)
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                f"UPDATE thumbnail_tests SET {assignments} WHERE id = ?",
+                (*clean.values(), int(test_id)),
+            )
+
+    def get_thumbnail_test(self, test_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM thumbnail_tests WHERE id = ?", (int(test_id),)).fetchone()
+        return self._decode_test(row)
+
+    def latest_thumbnail_test(self, video_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM thumbnail_tests WHERE video_id = ? ORDER BY id DESC LIMIT 1",
+                (video_id,),
+            ).fetchone()
+        return self._decode_test(row)
+
+    def list_thumbnail_tests(self, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        clause, params = ("", ())
+        if status:
+            clause, params = ("WHERE status = ?", (status,))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM thumbnail_tests {clause} ORDER BY id DESC LIMIT ?",
+                (*params, max(1, min(limit, 200))),
+            ).fetchall()
+        return [item for item in (self._decode_test(r) for r in rows) if item]
+
+    # -- shorts series --------------------------------------------------
+    def create_series(self, record: dict[str, Any]) -> dict[str, Any]:
+        now = utcnow()
+        data = {k: v for k, v in record.items() if k in SERIES_COLUMNS}
+        data.setdefault("created_at", now)
+        data.setdefault("updated_at", now)
+        cols = ", ".join(data)
+        marks = ", ".join(["?"] * len(data))
+        with self._write_lock, self._connect() as conn:
+            conn.execute(f"INSERT INTO series ({cols}) VALUES ({marks})", tuple(data.values()))
+        return self.get_series(str(data["id"])) or data
+
+    def update_series(self, series_id: str, **fields: Any) -> None:
+        clean = {k: v for k, v in fields.items() if k in SERIES_COLUMNS and k != "id"}
+        if not clean:
+            return
+        clean["updated_at"] = utcnow()
+        assignments = ", ".join(f"{col} = ?" for col in clean)
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                f"UPDATE series SET {assignments} WHERE id = ?",
+                (*clean.values(), series_id),
+            )
+
+    def get_series(self, series_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM series WHERE id = ?", (series_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_series(self, include_disabled: bool = True) -> list[dict[str, Any]]:
+        clause = "" if include_disabled else "WHERE enabled = 1"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM series {clause} ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_series(self, series_id: str) -> None:
+        with self._write_lock, self._connect() as conn:
+            conn.execute("DELETE FROM series WHERE id = ?", (series_id,))
 
     # -- preferences ----------------------------------------------------
     def set_pref(self, key: str, value: Any) -> None:

@@ -79,6 +79,9 @@ DEFAULTS: dict[str, Any] = {
         "long": [1920, 1080],
         "keep_work_files": False,
     },
+    "thumbnails": {
+        "arm_hours": 72,
+    },
     "youtube": {
         "enabled": False,
         "client_secret": "secrets/client_secret.json",

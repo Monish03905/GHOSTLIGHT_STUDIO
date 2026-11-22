@@ -1,6 +1,6 @@
 # The platform, module by module
 
-This page maps the 15-module blueprint Ghostlight grew from — plus the ten
+This page maps the 15-module blueprint Ghostlight grew from — plus the thirteen
 later additions — onto what actually ships in this repository, and just as
 importantly onto what does **not**. Nothing here is a promise of revenue; see
 [MONETIZATION.md](MONETIZATION.md) for that conversation.
@@ -23,7 +23,7 @@ importantly onto what does **not**. Nothing here is a promise of revenue; see
 | **12. AI brain** | `showrunner.py`, `autopilot` settings | A per-channel playbook learns which niches, registers and hours travel, then re-weights tomorrow's choices while keeping an exploration slice. This is an adaptive bandit over real analytics — not a trained model, and it never invents numbers. |
 | **13. Multi-account** | `channels.py`, `secrets/channels/<id>/` | Any number of voices, each with its own token, client secret, quota, airtimes, visibility, approval mode and analytics. |
 | **14. Idea wall & calendar** | `ideas.py`, **The Radar** tab | Original pitch cards with an angle, question and director's guidance; one click turns a pitch into a commission. The calendar shows planned airtimes, ready films, films in production and what already published — and says "empty" when it is empty. |
-| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream, dressed as **Aurora Theatre** — a drifting star canvas, layered aurora washes, glass panels, a warm ghost light and a serif/sans type pairing. **Four moods** — night, daylight, twilight and ember — repaint the stage, aurora, star tint and browser theme-colour, and the choice is remembered in `localStorage`. A ⌘/Ctrl-K command palette searches every view, action, film, chapter and mood, driving the same API calls a click would; bare keys move between views (`1`–`5`), open the observatory (`O`), cycle moods (`T`), open the bell (`B`) and focus the command bar (`/`). A live studio clock sits in the masthead, and the film drawer carries a chapter rail built from real narration timings that seeks the player. Installable on desktop and mobile; shell assets are fetched network-first (cache `ghostlight-v6`) so an update lands on the next load, with the cache used only offline. All studio state stays network-only. |
+| **15. Dashboard & PWA** | `web/`, `web/sw.js`, `web/manifest.webmanifest` | The studio desk, network, radar, shelf and settings with a live event stream, dressed as **Aurora Theatre** — a drifting star canvas, layered aurora washes, glass panels, a warm ghost light and a serif/sans type pairing. **Four moods** — night, daylight, twilight and ember — repaint the stage, aurora, star tint and browser theme-colour, and the choice is remembered in `localStorage`. A ⌘/Ctrl-K command palette searches every view, action, film, chapter and mood, driving the same API calls a click would; bare keys move between views (`1`–`5`), open the observatory (`O`), cycle moods (`T`), open the bell (`B`) and focus the command bar (`/`). A live studio clock sits in the masthead, and the film drawer carries a chapter rail built from real narration timings that seeks the player. Installable on desktop and mobile; shell assets are fetched network-first (cache `ghostlight-v7`) so an update lands on the next load, with the cache used only offline. All studio state stays network-only. |
 | **16. Vertical repurposing** | `ghostlight/repurpose.py`, `orchestrator.repurpose` | Cuts complete-thought clips from a finished film using the word timings in `narration.json`. Windows are 15–60 s, non-overlapping, deduplicated by digest and text overlap, and never split a spoken sentence. Each cut becomes its own vertical child record (`kind=clip`) with blurred-fill framing, fitted foreground and burned-in captions, so the normal gate, approval, share-kit and upload paths work unchanged. |
 | **17. Localization** | `ghostlight/languages.py`, the film drawer | The configured model translates title, hook, description, tags and every spoken segment into fifteen languages — English, Hindi, Telugu, Tamil, Bengali, Marathi, Gujarati, Kannada, Malayalam, Arabic, Japanese, Spanish, French, German and Portuguese. Segment counts are validated and unchanged source text is rejected rather than passed off as a translation. Captions keep the original timings; a localized voiceover is recorded only when `edge-tts` is reachable and is labelled with its real provider. |
 | **18. Editorial read** | `ghostlight/editorial.py`, the film drawer | A deterministic second read of the script: hook, pacing, clarity, payoff, invitation, repetition, structure and rights flags, with a 0–100 score, concrete notes and hook starting points. It calls no model and explicitly labels its retention band a structural guess, not a forecast. |
@@ -34,6 +34,9 @@ importantly onto what does **not**. Nothing here is a promise of revenue; see
 | **23. Instagram & TikTok** | `ghostlight/social.py`, `GET /api/social/status`, the share kit | Real Graph API v21 Reels (container → status poll → publish) and TikTok Content Posting API v2 (`PULL_FROM_URL`) code paths. The studio signs its own `/api/social/media/<id>` links with an HMAC key under `secrets/social/`, requires a public HTTPS base, and serves the operator's TikTok URL-prefix verification file. Every send needs `confirm: true`, passes the hard quality gate first, and is recorded in `social_posts`. Off by default; TikTok defaults to `SELF_ONLY`. |
 | **24. AI shots** | `ghostlight/aivideo.py`, **AI shots** settings | OpenAI Videos or Replicate text-to-video as silent moving bases for the first scenes, budget-capped before anything is bought. Prompts carry a faceless/documentary guardrail; a failed or disabled provider falls back to painted plates with a logged reason. The still poster and the AI disclosure stay in place. |
 | **25. Research triage** | `ghostlight/research.py`, the film drawer's **Fact check** panel | Extracts numbered, dated, superlative and named claims from the narration, searches Wikipedia and OpenAlex (plus an optional SearXNG instance) for allowlisted sources, and scores each claim by word overlap: ≥55% supported, ≥25% related, else unmatched. Sources are linked and kept. The fixed caveat says this is triage, not verification, and a missing match is not proof of falsity. |
+| **26. Thumbnail trials** | `ghostlight/thumbtest.py`, the `thumbnail_tests` table, the film drawer's **Thumbnail trial** block | Rotates two or three takes the film already painted through equal time slices on a **published** video (`thumbnails.arm_hours`, 72 h default, clamped 24–336), swapping the live thumbnail on YouTube at each switch. The leader is chosen by views per equal window plus a small watch-minutes nudge; with no impressions the trial is reported inconclusive. Every result prints a fixed caveat: equal windows only, a direction rather than proof. Channels that have not proven they can set custom thumbnails land in `blocked` with the reason. The background tick advances due trials every six minutes; **Check now** and **Keep the current take** are in the drawer. |
+| **27. Series** | `ghostlight/series.py`, the `series` table, **The knobs → The series** | A premise plus a cadence (1–7 days) at a fixed local time. The scheduler commissions one Short each time a series comes due — capped by `max_episodes`, disabled after the last one — and only while the schedule is enabled, unpaused and the studio idle. Each episode is its own idea: `series.guidance()` repeats the no-continuity rule, forbids referencing earlier episodes and keeps the faceless constraint, so the novelty gate still passes or fails on its own terms. **Make an episode now** fires the same path by hand. Removed series keep their films on the shelf. |
+| **28. Public show** | `ghostlight/show.py`, `GET /show`, `GET /show/{video_id}` | A server-rendered, login-free page for **published** films only — drafts, review-parked and archived films return 404. Cards carry the poster, channel, format, duration and date; a film page plays the local cut, or shows the poster when only the thumbnail exists, with OG/Twitter-friendly meta and the base URL taken from `social.public_url` then `studio.public_url`. All copy is HTML-escaped, the RSS shelf stays at `/feed.xml`, and the page reaches other people only when the operator chooses to expose the server. |
 
 ## Honest boundaries
 
@@ -82,6 +85,25 @@ infrastructure or review processes that no local build can supply honestly.
   which claims found nothing. It does not read sources for truth, cannot
   resolve numbers or quotes, and a missing match proves nothing. The editorial
   rights check remains a keyword heuristic, not legal clearance.
+- **Thumbnail trials compare views, not impressions.** The three arms rotate on
+  equal wall-clock slices and are judged on views per hour with a small
+  watch-time nudge. YouTube does not report a per-thumbnail impression split
+  through this API, so a trial is directional: a large, same-window difference
+  is a useful signal, a small one is not proof. Short trials, low traffic or a
+  channel that cannot set custom thumbnails produce an inconclusive or blocked
+  result rather than a winner.
+- **A series is a cadence, not a story arc.** Every episode is commissioned as
+  its own standalone film with the no-continuity rule spelled out in the
+  guidance, and each still has to pass the same novelty gate. Nothing fires
+  while the schedule is disabled or paused, while a film is rendering, or once
+  `max_episodes` is reached; a failed commission is logged and skipped rather
+  than retried in a loop.
+- **The public show is as public as the machine is.** `/show` is an
+  unauthenticated HTML page served by this same process, so it is visible to
+  other people only if the operator exposes the port or puts a proxy in front
+  of it. It reads published films only — drafts, review-parked and archived
+  films 404 — and it has no comments, accounts, analytics or editing. There is
+  no CDN, no cache-busting by design and no separate reader app.
 - **No billing or team accounts.** Usage stays on one machine and one
   operator. Adding subscriptions, seats or usage metering would require a
   real payment processor, auth and tenancy model — none of which is faked

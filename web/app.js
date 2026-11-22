@@ -430,6 +430,7 @@ async function openDrawer(id) {
       ${v.poster_path && !v.video_path ? `<img src="/api/videos/${v.id}/file/poster" alt="poster" />` : ''}
     </div>
     ${variantsBlock}
+    ${v.youtube_id ? '<div class="thumb-trial" id="thumb-trial"></div>' : ''}
     <div class="film-actions">${actions.join('')}</div>
     <div class="clip-plan" id="clip-plan" hidden></div>
     ${clipsBlock(v)}
@@ -450,6 +451,7 @@ async function openDrawer(id) {
   drawer.hidden = false;
   veil.hidden = false;
   loadReadout(v.id);
+  if (v.youtube_id) loadThumbTrial(v);
 
   drawer.querySelectorAll('[data-act]').forEach((el) => {
     el.addEventListener('click', (ev) => {
@@ -512,6 +514,64 @@ function fmtBytes(n) {
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
+async function loadThumbTrial(v) {
+  const host = $('#thumb-trial');
+  if (!host) return;
+  let test;
+  try {
+    test = await api(`/api/videos/${v.id}/thumbnail-test`);
+  } catch (_) {
+    host.innerHTML = '';
+    return;
+  }
+  const arms = Array.isArray(test.arms) ? test.arms : [];
+  const samples = Array.isArray(test.samples) ? test.samples : [];
+  const status = test.status || 'none';
+  const canStart = (Array.isArray(v.thumb_variants) ? v.thumb_variants : []).length >= 2;
+  const sampleRows = samples.map((s) => {
+    const metrics = s.metrics || {};
+    return `<li>${esc(s.label || s.variant)} · ${fmtNum(metrics.views || 0)} views over ${s.hours} h · score ${s.score}</li>`;
+  }).join('');
+  let body = '';
+  if (status === 'none') {
+    body = `<p class="trial-note">Rotate the takes on the live video and compare views per equal window.</p>
+      <button class="btn" data-trial="start" ${canStart ? '' : 'disabled'}>Start a trial</button>`;
+  } else if (status === 'running') {
+    const next = test.next_switch_at ? esc(test.next_switch_at.slice(0, 16).replace('T', ' ')) : 'soon';
+    body = `<p class="trial-note">${arms.length} takes · ${Math.round((test.arm_seconds || 0) / 3600)} h each · next swap ${next}</p>
+      ${sampleRows ? `<ul class="trial-samples">${sampleRows}</ul>` : ''}
+      <div class="trial-actions">
+        <button class="btn" data-trial="tick">Check now</button>
+        <button class="btn" data-trial="stop">Keep current take</button>
+      </div>`;
+  } else {
+    body = `<p class="trial-note">${esc(test.note || status)}</p>
+      ${sampleRows ? `<ul class="trial-samples">${sampleRows}</ul>` : ''}`;
+  }
+  host.innerHTML = `<span class="kicker">Thumbnail trial</span>${body}
+    <p class="secret-note">${esc(test.caveat || '')}</p>`;
+  host.querySelectorAll('[data-trial]').forEach((el) => {
+    el.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      el.disabled = true;
+      try {
+        if (el.dataset.trial === 'start') {
+          await api(`/api/videos/${v.id}/thumbnail-test/start`, { method: 'POST', body: {} });
+        } else if (el.dataset.trial === 'tick') {
+          await api(`/api/videos/${v.id}/thumbnail-test/tick`, { method: 'POST' });
+        } else {
+          await api(`/api/videos/${v.id}/thumbnail-test/stop`, { method: 'POST', body: {} });
+        }
+        await loadThumbTrial(v);
+        refresh();
+      } catch (exc) {
+        el.disabled = false;
+        alert(`The trial could not continue: ${exc.message}`);
+      }
+    });
+  });
 }
 
 function clipsBlock(v) {
@@ -938,6 +998,7 @@ const SETTING_FIELDS = [
       ['render.fps', 'Frames per second', 'number'],
       ['render.crf', 'Quality (crf, lower = finer)', 'number'],
       ['render.keep_work_files', 'Keep work files', 'check'],
+      ['thumbnails.arm_hours', 'Thumbnail trial arm (hours)', 'number'],
     ],
   },
   {
@@ -1122,7 +1183,10 @@ function switchView(view) {
   state.view = view;
   if (view === 'network') loadNetwork().catch(() => {});
   if (view === 'radar') loadRadar().catch(() => {});
-  if (view === 'settings') loadLibraryPanel().catch(() => {});
+  if (view === 'settings') {
+    loadLibraryPanel().catch(() => {});
+    loadSeries().catch(() => {});
+  }
 }
 
 function renderYoutubePanel(status) {
@@ -1202,6 +1266,143 @@ function renderSchedulePanel(status) {
   const resumeBtn = $('#sched-resume');
   if (resumeBtn) resumeBtn.addEventListener('click', async () => {
     await api('/api/schedule/resume', { method: 'POST' }); refresh();
+  });
+}
+
+/* ---------- series ---------- */
+
+const SERIES = { items: [], options: { niches: [], styles: [] }, channels: [] };
+
+async function loadSeries() {
+  const host = $('#series-body');
+  if (!host) return;
+  const active = document.activeElement;
+  if (active && host.contains(active) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+  try {
+    const [data, look] = await Promise.all([api('/api/series'), api('/api/channels')]);
+    SERIES.items = data.items || [];
+    SERIES.options = look.options || SERIES.options;
+    SERIES.channels = look.channels || [];
+  } catch (_) {
+    return;
+  }
+  renderSeriesPanel();
+}
+
+function seriesChannelName(id) {
+  const found = SERIES.channels.find((c) => c.id === id);
+  return found ? found.name : id;
+}
+
+function renderSeriesPanel() {
+  const host = $('#series-body');
+  if (!host) return;
+  const channelOptions = ['<option value="">Any voice</option>'].concat(
+    SERIES.channels.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`),
+  ).join('');
+  const nicheOptions = ['<option value="">Any niche</option>'].concat(
+    (SERIES.options.niches || []).map((n) => `<option value="${esc(n.id)}">${esc(n.label)}</option>`),
+  ).join('');
+  const styleOptions = ['<option value="">Any style</option>'].concat(
+    (SERIES.options.styles || []).map((s) => `<option value="${esc(s.id)}">${esc(s.label || s.id)}</option>`),
+  ).join('');
+  const cards = SERIES.items.map((s) => `
+    <div class="series-card ${s.enabled ? '' : 'off'}">
+      <div class="series-head">
+        <strong>${esc(s.title)}</strong>
+        ${s.complete ? '<span class="time-pill">complete</span>'
+          : s.due ? '<span class="time-pill">due now</span>'
+          : s.enabled ? '' : '<span class="time-pill">paused</span>'}
+      </div>
+      ${s.premise ? `<p class="series-premise">${esc(s.premise)}</p>` : ''}
+      <p class="secret-note">every ${s.cadence_days} day(s) at ${esc(s.time)} ·
+        ${s.episodes}${s.max_episodes ? `/${s.max_episodes}` : ''} episodes
+        ${s.enabled && s.next_at ? ` · next ${esc(s.next_at.slice(0, 16).replace('T', ' '))}` : ''}
+        ${s.channel_id ? ` · ${esc(seriesChannelName(s.channel_id))}` : ''}</p>
+      <div class="series-actions">
+        <button class="link-btn" data-series-fire="${esc(s.id)}">Make an episode now</button>
+        <button class="link-btn" data-series-toggle="${esc(s.id)}" data-on="${s.enabled ? 1 : 0}">${s.enabled ? 'Pause' : 'Resume'}</button>
+        <button class="link-btn" data-series-del="${esc(s.id)}">Remove</button>
+      </div>
+    </div>`).join('');
+  host.innerHTML = `
+    <form class="series-form" id="series-form">
+      <input name="title" placeholder="Series title" maxlength="90" required />
+      <input name="premise" placeholder="The territory — one or two lines" maxlength="600" />
+      <div class="series-row">
+        <select name="channel_id">${channelOptions}</select>
+        <select name="niche">${nicheOptions}</select>
+        <select name="style">${styleOptions}</select>
+      </div>
+      <div class="series-row">
+        <label>every <input name="cadence_days" type="number" min="1" max="7" value="1" /> day(s)</label>
+        <label>at <input name="time" type="time" value="18:00" /></label>
+        <label>cap <input name="max_episodes" type="number" min="0" max="365" value="0" /></label>
+      </div>
+      <button class="btn primary" type="submit">Schedule the series</button>
+      <span class="save-note" id="series-note"></span>
+    </form>
+    ${cards ? `<div class="series-list">${cards}</div>` : '<p class="secret-note">No series yet.</p>'}`;
+
+  const note = $('#series-note');
+  $('#series-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const form = ev.target;
+    const body = {
+      title: form.title.value,
+      premise: form.premise.value,
+      channel_id: form.channel_id.value,
+      niche: form.niche.value,
+      style: form.style.value,
+      cadence_days: Number(form.cadence_days.value) || 1,
+      time: form.time.value || '18:00',
+      max_episodes: Number(form.max_episodes.value) || 0,
+    };
+    try {
+      await api('/api/series', { method: 'POST', body });
+      form.reset();
+      await loadSeries();
+    } catch (exc) {
+      note.textContent = `Couldn't schedule it: ${exc.message}`;
+    }
+  });
+
+  host.querySelectorAll('[data-series-fire]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      el.disabled = true;
+      try {
+        await api(`/api/series/${el.dataset.seriesFire}/fire`, { method: 'POST' });
+        await loadSeries();
+        refresh();
+      } catch (exc) {
+        el.disabled = false;
+        alert(`The episode could not start: ${exc.message}`);
+      }
+    });
+  });
+
+  host.querySelectorAll('[data-series-toggle]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const enabled = el.dataset.on !== '1';
+      try {
+        await api(`/api/series/${el.dataset.seriesToggle}`, { method: 'PATCH', body: { enabled } });
+        await loadSeries();
+      } catch (exc) {
+        alert(`That didn't work: ${exc.message}`);
+      }
+    });
+  });
+
+  host.querySelectorAll('[data-series-del]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      if (!window.confirm('Remove this series? Its films stay on the shelf.')) return;
+      try {
+        await api(`/api/series/${el.dataset.seriesDel}`, { method: 'DELETE' });
+        await loadSeries();
+      } catch (exc) {
+        alert(`That didn't work: ${exc.message}`);
+      }
+    });
   });
 }
 
@@ -2073,6 +2274,7 @@ async function refresh() {
     renderStats(status.stats);
     renderYoutubePanel(status);
     renderSchedulePanel(status);
+    loadSeries().catch(() => {});
     if (!Object.keys(state.dirty).length) {
       renderSettings(await api('/api/settings'));
     }
