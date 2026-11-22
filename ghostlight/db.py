@@ -50,13 +50,14 @@ VIDEO_COLUMNS = {
     "parent_id",
     "language",
     "editorial",
+    "research",
     "clip_start",
     "clip_end",
 }
 
 JSON_COLUMNS = {
     "tags", "script", "brief", "fingerprint", "upload_meta", "quality",
-    "thumb_variants", "editorial",
+    "thumb_variants", "editorial", "research",
 }
 
 CHANNEL_COLUMNS = {
@@ -112,6 +113,7 @@ CREATE TABLE IF NOT EXISTS videos (
     parent_id TEXT DEFAULT '',
     language TEXT DEFAULT 'en',
     editorial TEXT DEFAULT '{}',
+    research TEXT DEFAULT '{}',
     clip_start REAL DEFAULT 0,
     clip_end REAL DEFAULT 0
 );
@@ -235,6 +237,18 @@ CREATE TABLE IF NOT EXISTS localizations (
     updated_at TEXT NOT NULL,
     UNIQUE(video_id, language)
 );
+
+CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL,
+    target TEXT NOT NULL,
+    remote_id TEXT DEFAULT '',
+    url TEXT DEFAULT '',
+    status TEXT DEFAULT 'published',
+    detail TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_social_video ON social_posts(video_id, id DESC);
 """
 
 
@@ -309,6 +323,7 @@ class Database:
             "parent_id": "TEXT DEFAULT ''",
             "language": "TEXT DEFAULT 'en'",
             "editorial": "TEXT DEFAULT '{}'",
+            "research": "TEXT DEFAULT '{}'",
             "clip_start": "REAL DEFAULT 0",
             "clip_end": "REAL DEFAULT 0",
         }
@@ -793,6 +808,49 @@ class Database:
                 "DELETE FROM localizations WHERE video_id = ? AND language = ?",
                 (video_id, language),
             )
+
+    # -- social posts ---------------------------------------------------
+    def add_social_post(
+        self,
+        video_id: str,
+        target: str,
+        *,
+        remote_id: str = "",
+        url: str = "",
+        status: str = "published",
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        with self._write_lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO social_posts (video_id, target, remote_id, url, status, detail, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (video_id, target, remote_id, url, status, _encode(detail or {}), now),
+            )
+            post_id = int(cur.lastrowid or 0)
+        return {
+            "id": post_id, "video_id": video_id, "target": target, "remote_id": remote_id,
+            "url": url, "status": status, "detail": detail or {}, "created_at": now,
+        }
+
+    def list_social_posts(self, video_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        clause, params = ("", ())
+        if video_id:
+            clause, params = ("WHERE video_id = ?", (video_id,))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM social_posts {clause} ORDER BY id DESC LIMIT ?",
+                (*params, max(1, min(limit, 100))),
+            ).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["detail"] = json.loads(item.get("detail") or "{}")
+            except json.JSONDecodeError:
+                item["detail"] = {}
+            out.append(item)
+        return out
 
     # -- preferences ----------------------------------------------------
     def set_pref(self, key: str, value: Any) -> None:

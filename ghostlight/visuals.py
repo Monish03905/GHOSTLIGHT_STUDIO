@@ -28,6 +28,9 @@ class Scene:
     atmosphere: Path | None = None
     sweep: Path | None = None
     drift: float = 0.0
+    # When set, the renderer uses this clip as the moving base instead of the
+    # still. `path` stays as the extracted still for posters and thumbnails.
+    video: Path | None = None
 
 
 def _rgb(palette: dict[str, tuple[int, int, int]], key: str) -> np.ndarray:

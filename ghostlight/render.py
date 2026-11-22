@@ -236,10 +236,22 @@ class Renderer:
         duration = frames / fps
         phase = scene.drift * 6.2832
         layers: list[Path] = []
-        graph: list[str] = [
-            f"[0:v]scale=iw*1.5:ih*1.5:flags=lanczos,"
-            f"zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps}[bg]"
-        ]
+        ai_clip = scene.video if scene.video and scene.video.exists() else None
+        if ai_clip:
+            # Generated motion already moves; crop/loop it to the shot length
+            # and keep the studio's atmosphere layers on top.
+            graph: list[str] = [
+                f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},fps={fps},setsar=1,"
+                f"trim=duration={duration:.3f},setpts=PTS-STARTPTS[bg]"
+            ]
+            args: list[str] = ["-y", "-stream_loop", "-1", "-i", str(ai_clip)]
+        else:
+            graph = [
+                f"[0:v]scale=iw*1.5:ih*1.5:flags=lanczos,"
+                f"zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps}[bg]"
+            ]
+            args = ["-y", "-i", str(scene.path)]
         last = "[bg]"
 
         if scene.mid and scene.mid.exists():
@@ -272,7 +284,6 @@ class Renderer:
 
         graph.append(f"{last}format=yuv420p[v]")
 
-        args: list[str] = ["-y", "-i", str(scene.path)]
         for layer in layers:
             args += ["-loop", "1", "-framerate", str(fps), "-t", f"{duration:.3f}", "-i", str(layer)]
 

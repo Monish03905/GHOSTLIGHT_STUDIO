@@ -3,11 +3,12 @@ from __future__ import annotations
 import queue
 import secrets as pysecrets
 import threading
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import content, editorial, publish, quality, repurpose
+from . import aivideo, content, editorial, publish, quality, repurpose
 from .channels import channel_by_id, primary_channel
 from .config import Config
 from .db import Database
@@ -401,6 +402,33 @@ class Studio:
             workdir / "art",
         )
         self.bus.step(video_id, "art", "Plates are on the easel.", 58)
+
+        try:
+            ai_report = aivideo.generate_for_film(
+                self.cfg, script, brief, len(scenes), int(width), int(height),
+                workdir / "ai", on_event=self._on_component_event,
+            )
+        except aivideo.VideoError as exc:
+            ai_report = None
+            self.bus.emit("art", f"AI video stayed out of this cut: {exc}", level="warning", video_id=video_id)
+        if ai_report and ai_report.get("clips"):
+            shots = ai_report.pop("clips")
+            for index, shot in enumerate(shots[: len(scenes)]):
+                scenes[index] = replace(
+                    scenes[index], path=Path(shot["still"]), video=Path(shot["clip"])
+                )
+            brief["ai_video"] = {**ai_report, "shots": len(shots)}
+            self.db.update_video(video_id, brief=brief)
+            self.bus.step(
+                video_id, "art",
+                f"{len(shots)} AI shot(s) from {ai_report.get('provider')} joined the plate stack.", 59,
+                provider=ai_report.get("provider"),
+            )
+        elif ai_report and ai_report.get("notes"):
+            self.bus.emit(
+                "art", "AI video stayed off: " + " ".join(ai_report["notes"]),
+                level="info", video_id=video_id,
+            )
 
         self.db.update_video(video_id, stage="render", progress=60)
         self.bus.step(video_id, "render", "The camera is rolling.", 60)

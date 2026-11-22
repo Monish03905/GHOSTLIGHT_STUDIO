@@ -10,6 +10,8 @@ const state = {
   currentFilm: null,
   view: 'desk',
   flash: null,
+  socialStatus: null,
+  aiVideoStatus: null,
 };
 
 const NETWORK = {
@@ -403,6 +405,8 @@ async function openDrawer(id) {
   if (upload.contains_synthetic_media) uploadBits.push('AI-disclosed');
   if (upload.auto_captions) uploadBits.push('captions attached');
   if (v.published_at) uploadBits.push(`published ${esc(v.published_at.slice(0, 16).replace('T', ' '))}`);
+  const socialPosts = Array.isArray(v.social_posts) ? v.social_posts : [];
+  if (socialPosts.length) uploadBits.push(socialPosts.map((p) => `${esc(p.target)}: ${esc(p.status)}`).join(' · '));
 
   drawer.innerHTML = `
     <button class="drawer-close" data-act="close">✕</button>
@@ -432,6 +436,7 @@ async function openDrawer(id) {
     ${readoutBlock(v)}
     ${qualityBlock(v)}
     ${editorialBlock(v)}
+    ${researchBlock(v)}
     ${localizationBlock(v)}
     ${uploadBits.length ? `<p class="secret-note">${uploadBits.join(' · ')}</p>` : ''}
     ${v.error ? `<div class="error-note">${esc(v.error)}</div>` : ''}
@@ -451,6 +456,22 @@ async function openDrawer(id) {
       if (el.tagName === 'A') return;
       ev.stopPropagation();
       drawerAction(el.dataset.act, v.id);
+    });
+  });
+
+  drawer.querySelectorAll('[data-research]').forEach((el) => {
+    el.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      el.disabled = true;
+      el.textContent = 'Reading sources…';
+      try {
+        await api(`/api/videos/${v.id}/research`, { method: 'POST' });
+        await openDrawer(v.id);
+      } catch (exc) {
+        el.disabled = false;
+        el.textContent = 'Read the sources';
+        alert(`The fact check could not finish: ${exc.message}`);
+      }
     });
   });
 
@@ -506,6 +527,40 @@ function clipsBlock(v) {
           <span class="clip-tile-meta">${fmtDur(clip.duration)} · ${esc(clip.status)}</span>
         </button>`).join('')}
     </div>
+  </div>`;
+}
+
+function researchBlock(v) {
+  const report = v.research && Array.isArray(v.research.claims) ? v.research : null;
+  const head = `<div class="research-head">
+      <span class="kicker">Fact check</span>
+      <span class="obs-hint">automated triage · needs a person</span>
+    </div>`;
+  if (!report) {
+    return `<div class="research-block">
+      ${head}
+      <p class="research-note">Search Wikipedia and OpenAlex for the script's numbered and named claims. The studio keeps the sources, marks what matched, and never calls that verification.</p>
+      <button class="btn small" data-research="run">Read the sources</button>
+    </div>`;
+  }
+  const counts = report.counts || {};
+  const claims = (report.claims || []).map((c) => {
+    const links = (c.sources || [])
+      .map((s) => `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener" title="${esc(s.publisher || '')}">${esc(s.title || s.publisher)}</a>`)
+      .join(' · ');
+    return `<li class="research-claim status-${esc(c.status)}">
+      <span class="research-status">${esc(c.status)} · ${Math.round((c.confidence || 0) * 100)}% word match</span>
+      <p>${esc(c.text)}</p>
+      ${links ? `<div class="research-sources">${links}</div>` : '<div class="research-sources">No allowed source matched.</div>'}
+    </li>`;
+  }).join('');
+  return `<div class="research-block">
+    ${head}
+    <p class="research-verdict">${esc(report.verdict || '')}</p>
+    <p class="research-note">${counts.claims || 0} claim(s) checked · ${counts.supported || 0} supported · ${counts.related || 0} related · ${counts.unmatched || 0} unmatched</p>
+    <ul class="research-list">${claims}</ul>
+    <p class="research-caveat">${esc(report.caveat || '')}</p>
+    <button class="btn small" data-research="run">Check again</button>
   </div>`;
 }
 
@@ -781,9 +836,19 @@ async function runCommandSilently(text) {
 
 async function showShareKit(id) {
   const kit = await api(`/api/videos/${id}/share`);
+  let social = null;
+  try { social = await api('/api/social/status'); } catch (_) {}
   const drawer = $('#drawer');
   const old = drawer.querySelector('.share-kit');
   if (old) old.remove();
+  const socialButtons = (social && social.enabled)
+    ? ['instagram', 'tiktok'].map((target) => {
+        const item = (social.targets || {})[target] || {};
+        const label = target === 'instagram' ? 'Instagram' : 'TikTok';
+        return `<button class="btn small" data-social="${target}" ${item.ready ? '' : 'disabled'}
+          title="${esc(item.reason || '')}">Send to ${label}</button>`;
+      }).join('')
+    : '';
   const box = document.createElement('div');
   box.className = 'share-kit';
   box.innerHTML = `
@@ -792,9 +857,41 @@ async function showShareKit(id) {
       <button class="btn small primary" id="kit-copy">Copy caption</button>
       ${kit.srt ? '<button class="btn small" id="kit-srt">Download .srt</button>' : ''}
       ${kit.url ? `<a class="btn small" href="${esc(kit.url)}" target="_blank" rel="noopener">Open on YouTube</a>` : ''}
-    </div>`;
+      ${socialButtons}
+    </div>
+    <div class="kit-note" id="kit-social-note">${
+      social && !social.enabled
+        ? 'Instagram and TikTok are switched off. Turn them on in The knobs once their tokens exist.'
+        : ''
+    }</div>`;
   drawer.appendChild(box);
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  box.querySelectorAll('[data-social]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const target = el.dataset.social;
+      const label = target === 'instagram' ? 'Instagram' : 'TikTok';
+      if (!window.confirm(`Send “${kit.title}” to ${label} now? This publishes from the studio.`)) return;
+      const note = $('#kit-social-note');
+      el.disabled = true;
+      el.textContent = 'Sending…';
+      try {
+        const result = await api(`/api/videos/${id}/social/${target}`, { method: 'POST', body: { confirm: true } });
+        const notes = [].concat(result.notes || [], result.note || []);
+        note.className = `kit-note ${result.status === 'published' ? 'success' : ''}`;
+        note.textContent = result.status === 'published'
+          ? `${label} accepted the film (${result.remote_id || 'no id'}). ${notes.join(' ')}`
+          : `${label} is still processing (${result.remote_id || 'no id'}). ${notes.join(' ')}`;
+        el.textContent = result.status === 'published' ? 'Sent' : 'Processing';
+        refresh();
+      } catch (exc) {
+        note.className = 'kit-note error';
+        note.textContent = exc.message;
+        el.disabled = false;
+        el.textContent = `Send to ${label}`;
+      }
+    });
+  });
 
   $('#kit-copy').addEventListener('click', async () => {
     try {
@@ -877,6 +974,45 @@ const SETTING_FIELDS = [
     ],
   },
   {
+    group: 'Instagram & TikTok',
+    key: 'social',
+    rows: [
+      ['social.enabled', 'Social sending', 'check'],
+      ['social.public_url', 'Public HTTPS address of this studio', 'text'],
+      ['social.require_confirm', 'Ask before every send', 'check'],
+      ['social.instagram.enabled', 'Instagram sending', 'check'],
+      ['social.instagram.account_id', 'Instagram business account id', 'text'],
+      ['social.tiktok.enabled', 'TikTok sending', 'check'],
+      ['social.tiktok.client_key', 'TikTok client key', 'text'],
+      ['social.tiktok.privacy', 'TikTok privacy (SELF_ONLY/…)', 'text'],
+      ['social.tiktok.verify_path', 'TikTok verify path', 'text'],
+      ['social.tiktok.verify_content', 'TikTok verify file text', 'text'],
+    ],
+  },
+  {
+    group: 'AI shots',
+    key: 'ai_video',
+    rows: [
+      ['ai_video.enabled', 'Generate moving shots', 'check'],
+      ['ai_video.provider', 'Provider (openai/replicate/none)', 'text'],
+      ['ai_video.model', 'Model (blank = default)', 'text'],
+      ['ai_video.max_clips', 'AI shots per film', 'number'],
+      ['ai_video.seconds', 'Seconds per shot', 'number'],
+      ['ai_video.budget_usd', 'Budget cap per film (USD)', 'number'],
+      ['ai_video.cost_per_clip_usd', 'Cost per shot, if known (USD)', 'number'],
+    ],
+  },
+  {
+    group: 'Research',
+    rows: [
+      ['research.enabled', 'Web research triage', 'check'],
+      ['research.searxng_url', 'SearXNG address (optional)', 'text'],
+      ['research.mailto', 'Contact email for OpenAlex', 'text'],
+      ['research.max_claims', 'Claims per film', 'number'],
+      ['research.max_sources_per_claim', 'Sources per claim', 'number'],
+    ],
+  },
+  {
     group: 'The schedule',
     rows: [
       ['schedule.enabled', 'Run on its own', 'check'],
@@ -899,6 +1035,33 @@ function getByPath(obj, path) {
   return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
 }
 
+function socialReadyHtml(s) {
+  const t = s.targets || {};
+  const line = (target) => {
+    const item = t[target] || {};
+    return `${target === 'instagram' ? 'Instagram' : 'TikTok'}: ${
+      item.ready ? '<strong>ready</strong>' : esc(item.reason || 'not ready')}`;
+  };
+  return `${s.enabled && s.public_url ? `Public address: <code>${esc(s.public_url)}</code>. ` : ''}${line('instagram')} · ${line('tiktok')}`;
+}
+
+function aiReadyHtml(a) {
+  return a.ready
+    ? `Ready to draw with <strong>${esc(a.provider)}</strong>${a.model ? ` · ${esc(a.model)}` : ''}.`
+    : esc(a.reason || 'Not ready.');
+}
+
+function fillReadiness() {
+  api('/api/social/status').then((s) => {
+    state.socialStatus = s;
+    document.querySelectorAll('[data-ready="social"]').forEach((el) => { el.innerHTML = socialReadyHtml(s); });
+  }).catch(() => {});
+  api('/api/ai-video').then((a) => {
+    state.aiVideoStatus = a;
+    document.querySelectorAll('[data-ready="ai_video"]').forEach((el) => { el.innerHTML = aiReadyHtml(a); });
+  }).catch(() => {});
+}
+
 function renderSettings(snapshot) {
   state.settings = snapshot;
   state.dirty = {};
@@ -916,12 +1079,14 @@ function renderSettings(snapshot) {
         return `<div class="setting-row"><label for="set-${esc(path)}">${esc(label)}</label>
           <input type="${type}" id="set-${esc(path)}" data-path="${esc(path)}" value="${esc(shown)}" /></div>`;
       }).join('')}
+      ${g.key ? `<p class="setting-ready loading-block" data-ready="${esc(g.key)}">Checking readiness…</p>` : ''}
     </div>`).join('');
   body.innerHTML = html + `
     <div class="save-bar">
       <button class="btn primary" id="save-settings">Save the knobs</button>
       <span class="save-note" id="save-note"></span>
     </div>`;
+  fillReadiness();
 
   body.querySelectorAll('[data-path]').forEach((input) => {
     input.addEventListener('change', () => {

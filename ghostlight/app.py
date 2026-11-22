@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from . import (
-    __version__, content, editorial, evaluation, ideas, languages, library, observatory,
-    publish, quality, repurpose, trends,
+    __version__, aivideo, content, editorial, evaluation, ideas, languages, library,
+    observatory, publish, quality, repurpose, research, social, trends,
 )
 from .channels import (
     CHANNEL_TEMPLATES,
@@ -174,6 +174,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "published": stats["published"],
             })
         return {"totals": totals, "channels": rows}
+
+    # TikTok asks for a signature file at a path it chooses. Register it only
+    # when the operator has pasted both values; a restart applies a new path.
+    verify_path = str(cfg.get("social.tiktok.verify_path") or "").strip()
+    verify_body = str(cfg.get("social.tiktok.verify_content") or "").strip()
+    if verify_path.startswith("/") and not verify_path.startswith("/api") and verify_body:
+        @app.get(verify_path)
+        def tiktok_site_verification() -> Response:
+            return Response(content=verify_body, media_type="text/plain")
 
     # -- command --------------------------------------------------------
     @app.post("/api/command")
@@ -485,6 +494,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         item["metrics"] = db.get_metrics(video_id)
         item["clips"] = db.list_clips(video_id)
         item["localizations"] = db.list_localizations(video_id)
+        item["social_posts"] = db.list_social_posts(video_id)
         narration = publish.load_narration(item)
         chapters = []
         for segment in (narration.get("segments") or [])[:24]:
@@ -578,6 +588,85 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         kit["title"] = meta["title"]
         kit["description"] = meta["description"]
         return kit
+
+    # -- social publishing ----------------------------------------------
+    @app.get("/api/social/status")
+    def social_status() -> dict[str, Any]:
+        return social.status(cfg, db)
+
+    @app.get("/api/social/media/{video_id}")
+    def social_media(video_id: str, expires: int = 0, sig: str = "") -> FileResponse:
+        if not social.verify_media(cfg, video_id, expires, sig):
+            raise HTTPException(403, "This media link is invalid or has expired.")
+        item = db.get_video(video_id)
+        path = Path(str((item or {}).get("video_path") or ""))
+        if not item or not path.is_file():
+            raise HTTPException(404, "no rendered film for that id")
+        return FileResponse(path, media_type="video/mp4", filename=f"{video_id}.mp4")
+
+    @app.post("/api/videos/{video_id}/social/{target}")
+    async def publish_social(video_id: str, target: str, request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not bool((body or {}).get("confirm")):
+            raise HTTPException(400, "Sending a film to a social network needs an explicit confirm.")
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        channel = channel_by_id(cfg, db, item.get("channel_id")) or {}
+        report = item.get("quality") or {}
+        if not isinstance(report, dict) or not report.get("checks"):
+            report = quality.inspect(cfg, item, channel)
+            db.update_video(video_id, quality=report)
+        if report.get("hard_fail"):
+            raise HTTPException(400, "The quality gate is blocking this film; fix it before sending it anywhere.")
+        meta = publish.build_metadata(cfg, item, channel, publish.load_narration(item))
+        try:
+            result = await asyncio.to_thread(social.publish, cfg, db, target, item, meta)
+        except social.NotConfigured as exc:
+            raise HTTPException(400, str(exc))
+        except social.SocialError as exc:
+            raise HTTPException(502, str(exc))
+        label = str((social.status(cfg)["targets"].get(target) or {}).get("label") or target.title())
+        if result.get("status") == "published":
+            bus.emit("social", f"“{item.get('title', 'Film')}” went to {label}.", level="success", video_id=video_id)
+            bus.notify(
+                f"Sent to {label}",
+                f"“{item.get('title', 'Film')}” was accepted by {label}.",
+                kind="publish", level="success", video_id=video_id,
+            )
+        else:
+            bus.emit("social", f"{label} is still processing “{item.get('title', 'Film')}”.", video_id=video_id)
+        return result
+
+    @app.get("/api/ai-video")
+    def ai_video_status() -> dict[str, Any]:
+        return aivideo.readiness(cfg)
+
+    # -- research & fact-checking ---------------------------------------
+    @app.get("/api/videos/{video_id}/research")
+    def video_research(video_id: str) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        return {"id": video_id, "research": item.get("research") or {}}
+
+    @app.post("/api/videos/{video_id}/research")
+    async def run_research(video_id: str) -> dict[str, Any]:
+        item = db.get_video(video_id)
+        if not item:
+            raise HTTPException(404, "no such film")
+        report = await asyncio.to_thread(research.analyze, cfg, item)
+        db.update_video(video_id, research=report)
+        if report.get("counts", {}).get("claims"):
+            bus.emit(
+                "research",
+                f"Fact check for “{item.get('title', 'Film')}”: {report.get('verdict', '')}",
+                level="info", video_id=video_id,
+            )
+        return {"id": video_id, "research": report}
 
     @app.post("/api/videos/{video_id}/thumbnail")
     async def choose_thumbnail(video_id: str, request: Request) -> dict[str, Any]:

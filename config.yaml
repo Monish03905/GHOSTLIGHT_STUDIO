@@ -92,6 +92,82 @@ youtube:
   create_playlists: true
   tags_suffix:
   - ghostlight studio
+  oauth_redirect: ''
+  auto_captions: true
+  auto_comment: false
+  auto_start_schedule: true
+  analytics_days: 28
+social:
+  enabled: false
+  public_url: ''
+  require_confirm: true
+  media_ttl_seconds: 3600
+  instagram:
+    enabled: false
+    graph_version: v21.0
+    account_id: ''
+    secret_path: secrets/social/instagram.json
+    share_to_feed: true
+  tiktok:
+    enabled: false
+    client_key: ''
+    secret_path: secrets/social/tiktok.json
+    privacy: SELF_ONLY
+    verify_path: ''
+    verify_content: ''
+    max_wait_seconds: 180
+ai_video:
+  enabled: false
+  provider: none
+  model: ''
+  max_clips: 3
+  seconds: 4
+  budget_usd: 0.0
+  cost_per_clip_usd: 0.0
+  timeout_seconds: 60
+  poll_seconds: 5
+  max_wait_seconds: 600
+  image_field: first_frame_image
+research:
+  enabled: true
+  searxng_url: ''
+  mailto: ''
+  max_claims: 5
+  timeout_seconds: 12
+  max_sources_per_claim: 3
+  allowlist:
+  - wikipedia.org
+  - britannica.com
+  - openalex.org
+  - arxiv.org
+  - nature.com
+  - science.org
+  - sciencedirect.com
+  - nasa.gov
+  - noaa.gov
+  - usgs.gov
+  - who.int
+  - un.org
+  - unesco.org
+  - loc.gov
+  - si.edu
+  - bbc.co.uk
+  - reuters.com
+  - edu
+  - gov
+autopilot:
+  enabled: true
+  target_channels: 3
+  backlog: 1
+  backlog_hours: 6
+  learn_minutes: 180
+  adapt_schedule: false
+  explore: 0.18
+  max_films_per_day: 4
+distribution:
+  enabled: true
+  webhook_url: ''
+  rss: true
 schedule:
   enabled: false
   paused: true
@@ -108,18 +184,11 @@ schedule:
   min_gap_minutes: 240
   catch_up_minutes: 45
   max_failures_before_pause: 3
-autopilot:
-  enabled: true
-  target_channels: 3
-  backlog: 1
-  backlog_hours: 6
-  learn_minutes: 180
-  adapt_schedule: false
-  explore: 0.18
-  max_films_per_day: 4
-distribution:
-  enabled: true
-  webhook_url: ''
-  rss: true
 storage:
   data_dir: data
+costs:
+  currency: USD
+  writer_per_1k_words: 0.0
+  voice_per_minute: 0.0
+  render_per_minute: 0.0
+  storage_per_gb_month: 0.0
