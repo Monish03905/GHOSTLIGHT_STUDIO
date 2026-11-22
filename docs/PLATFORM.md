@@ -1,6 +1,6 @@
 # The platform, module by module
 
-This page maps the 15-module blueprint Ghostlight grew from — plus the eight
+This page maps the 15-module blueprint Ghostlight grew from — plus the seven
 later additions — onto what actually ships in this repository, and just as
 importantly onto what does **not**. Nothing here is a promise of revenue; see
 [MONETIZATION.md](MONETIZATION.md) for that conversation.

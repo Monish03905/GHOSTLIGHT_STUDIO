@@ -157,7 +157,7 @@ flowchart TD
 | Score | `music.py` | numpy-synthesised pads, chords and pulse, mood-matched and gain-controlled | `music.wav` |
 | Art | `visuals.py` | 7 painterly styles × 17 palettes; plate, silhouette midground and drifting foreground composited at different depths | scene plates |
 | Render | `render.py`, `captions.py`, `ffmpeg.py` | Camera push, sway, light sweep, grain, karaoke captions, chapter cards, poster and three thumbnails | `film_*.mp4`, `poster.jpg`, `thumbs/*.jpg` |
-| Gate | `quality.py` | Deterministic probe of streams, dimensions, bitrate, duration, captions, thumbnail, description, novelty | `quality` JSON |
+| Gate | `quality.py`, `evaluation.py` | Deterministic probe of streams, dimensions, bitrate, duration, captions, caption drift, measured loudness, thumbnail, description, novelty and the editorial read; the drawer then sums seven measured signals into the readout | `quality` JSON, readout |
 | Publish | `publish.py`, `youtube.py` | Resumable upload, SRT captions, thumbnail, playlist, hashtags, optional first comment, share kit, RSS | `youtube_id`, `upload_meta` |
 | Learn | `showrunner.py` | Analytics become a per-channel playbook that re-weights tomorrow's choices | playbook |
 </details>
@@ -192,12 +192,12 @@ The dashboard is plain HTML/CSS/JS with **no build step** — FastAPI serves it,
 | **The Desk** | Queue, films in flight, the desk log (server-sent events), and one-click commissions |
 | **The Network** | Channel cards, editorial journal, the next planned film per voice, and *Add a voice* |
 | **The Radar** | Scored trends per niche, the idea wall, the content calendar, and the AI brain's current reading |
-| **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, chapters, gate, editorial read, clips, languages, share kit and publishing |
+| **The Shelf** | Every film and vertical cut, filterable, with the film drawer for playback, the readout, chapters, gate, editorial read, clips, languages, share kit and publishing |
 | **The knobs** | Settings, YouTube key and schedule, plus **The archive**: storage, export, backup and a guarded prune |
 
 **The stage is interactive.** Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> for the command palette — it searches every view, action, film and chapter of the open film, plus the four moods, and runs the same API calls a click would. Bare keys drive the desk: <kbd>1</kbd>–<kbd>5</kbd> jump between views, <kbd>O</kbd> opens the observatory, <kbd>T</kbd> walks through night → daylight → twilight → ember, <kbd>B</kbd> opens the bell, <kbd>/</kbd> drops into the command bar, and <kbd>Esc</kbd> closes whatever is open, palette first. The masthead runs a live studio clock, and the chosen mood is remembered in `localStorage` across reloads and tabs.
 
-The film drawer adds a **chapter rail** built from the real word timings in `narration.json`: each chapter is a segment of the film, sized by its spoken length, and clicking one seeks the player there while the rail paints the current scene as it plays.
+The film drawer opens with **the readout** — seven signals measured from the film's own files and one honest score — then adds a **chapter rail** built from the real word timings in `narration.json`: each chapter is a segment of the film, sized by its spoken length, and clicking one seeks the player there while the rail paints the current scene as it plays.
 
 The bell in the masthead keeps durable notices — finished films, gate blocks, review requests, publications, failed localizations, exports and prunes. It survives restarts; the desk log is the transient stream beside it.
 
